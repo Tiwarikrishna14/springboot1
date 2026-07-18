@@ -1,0 +1,10 @@
+spring:
+  flyway:
+    placeholders:
+      initialAdminEmail: ${INITIAL_ADMIN_EMAIL:superadmin@example.com}
+      initialAdminPassword: ${INITIAL_ADMIN_PASSWORD:ChangeMe@12345}
+
+logging:
+  level:
+    com.company.orderapproval: INFO
+    org.springframework.security: INFO

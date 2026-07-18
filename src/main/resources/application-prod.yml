@@ -1,0 +1,22 @@
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  flyway:
+    placeholders:
+      initialAdminEmail: ${INITIAL_ADMIN_EMAIL}
+      initialAdminPassword: ${INITIAL_ADMIN_PASSWORD}
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    access-expiration-seconds: ${JWT_ACCESS_EXPIRATION:900}
+    refresh-expiration-seconds: ${JWT_REFRESH_EXPIRATION:604800}
+  cors:
+    allowed-origins: ${ALLOWED_ORIGINS}
+
+logging:
+  level:
+    root: INFO
+    com.company.orderapproval: INFO

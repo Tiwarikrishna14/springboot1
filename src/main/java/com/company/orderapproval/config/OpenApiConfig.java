@@ -1,0 +1,33 @@
+package com.company.orderapproval.config;
+
+import io.swagger.v3.oas.models.Components;
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class OpenApiConfig {
+
+    private static final String BEARER_AUTH = "bearerAuth";
+
+    @Bean
+    OpenAPI orderApprovalOpenApi() {
+        return new OpenAPI()
+                .info(new Info()
+                        .title("Order Approval Backend API")
+                        .version("v1")
+                        .description("Multi-tenant B2B order and inventory management starter backend"))
+                .addSecurityItem(new SecurityRequirement().addList(BEARER_AUTH))
+                .components(new Components().addSecuritySchemes(
+                        BEARER_AUTH,
+                        new SecurityScheme()
+                                .name(BEARER_AUTH)
+                                .type(SecurityScheme.Type.HTTP)
+                                .scheme("bearer")
+                                .bearerFormat("JWT")
+                ));
+    }
+}

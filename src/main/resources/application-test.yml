@@ -1,0 +1,15 @@
+spring:
+  flyway:
+    placeholders:
+      initialAdminEmail: ${INITIAL_ADMIN_EMAIL:superadmin@test.com}
+      initialAdminPassword: ${INITIAL_ADMIN_PASSWORD:Password@123}
+  jpa:
+    show-sql: false
+
+app:
+  jwt:
+    secret: test-secret-key-with-at-least-32-bytes-for-jwt
+    access-expiration-seconds: 900
+    refresh-expiration-seconds: 604800
+  cors:
+    allowed-origins: http://localhost:5173

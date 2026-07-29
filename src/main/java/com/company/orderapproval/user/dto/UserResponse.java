@@ -1,6 +1,7 @@
 package com.company.orderapproval.user.dto;
 
 import com.company.orderapproval.user.entity.UserStatus;
+import com.company.orderapproval.user.entity.UserType;
 
 import java.time.Instant;
 import java.util.List;
@@ -9,6 +10,10 @@ import java.util.UUID;
 public record UserResponse(
         UUID id,
         UUID organizationId,
+        UUID branchId,
+        UUID businessCustomerId,
+        UUID businessCustomerLocationId,
+        UserType userType,
         String firstName,
         String lastName,
         String email,

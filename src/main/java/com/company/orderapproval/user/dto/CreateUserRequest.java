@@ -7,9 +7,18 @@ import jakarta.validation.constraints.Size;
 
 import java.util.List;
 import java.util.UUID;
+import com.company.orderapproval.user.entity.UserType;
 
 public record CreateUserRequest(
         UUID organizationId,
+
+        UUID branchId,
+
+        UUID businessCustomerId,
+
+        UUID businessCustomerLocationId,
+
+        UserType userType,
 
         @NotBlank(message = "First name is required")
         @Size(max = 120, message = "First name must be at most 120 characters")

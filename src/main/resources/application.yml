@@ -4,7 +4,7 @@ spring:
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   datasource:
-    url: jdbc:postgresql://db.bunoceaaawmrgpnokwul.supabase.co:5432/postgres?user=postgres&password=Admin@123#123
+    url: jdbc:postgresql://aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres?user=postgres.bunoceaaawmrgpnokwul&password=Admin@123#123
     username: postgres
     password: Admin@123#123
   jpa:
@@ -53,6 +53,6 @@ app:
     access-expiration-seconds: ${JWT_ACCESS_EXPIRATION:900}
     refresh-expiration-seconds: ${JWT_REFRESH_EXPIRATION:604800}
   cors:
-    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://localhost:8080}
   password-reset:
     base-url: ${PASSWORD_RESET_BASE_URL:http://localhost:5173/reset-password}

@@ -8,6 +8,12 @@ import com.company.orderapproval.common.exception.ForbiddenException;
 import com.company.orderapproval.common.exception.ResourceNotFoundException;
 import com.company.orderapproval.common.util.SecurityContextHelper;
 import com.company.orderapproval.organization.repository.OrganizationRepository;
+import com.company.orderapproval.branch.entity.Branch;
+import com.company.orderapproval.branch.repository.BranchRepository;
+import com.company.orderapproval.customer.entity.BusinessCustomer;
+import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
+import com.company.orderapproval.customer.location.entity.BusinessCustomerLocation;
+import com.company.orderapproval.customer.location.repository.BusinessCustomerLocationRepository;
 import com.company.orderapproval.role.entity.Role;
 import com.company.orderapproval.role.repository.RoleRepository;
 import com.company.orderapproval.user.dto.AssignRolesRequest;
@@ -42,6 +48,9 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
+    private final BranchRepository branchRepository;
+    private final BusinessCustomerRepository businessCustomerRepository;
+    private final BusinessCustomerLocationRepository businessCustomerLocationRepository;
 
     public UserServiceImpl(UserRepository userRepository,
                            UserRoleRepository userRoleRepository,
@@ -49,7 +58,9 @@ public class UserServiceImpl implements UserService {
                            OrganizationRepository organizationRepository,
                            UserMapper userMapper,
                            PasswordEncoder passwordEncoder,
-                           AuditService auditService) {
+                           AuditService auditService, BranchRepository branchRepository,
+                           BusinessCustomerRepository businessCustomerRepository,
+                           BusinessCustomerLocationRepository businessCustomerLocationRepository) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.roleRepository = roleRepository;
@@ -57,6 +68,9 @@ public class UserServiceImpl implements UserService {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.auditService = auditService;
+        this.branchRepository = branchRepository;
+        this.businessCustomerRepository = businessCustomerRepository;
+        this.businessCustomerLocationRepository = businessCustomerLocationRepository;
     }
 
     @Override
@@ -64,7 +78,10 @@ public class UserServiceImpl implements UserService {
         UUID organizationFilter = SecurityContextHelper.isSuperAdmin()
                 ? null
                 : SecurityContextHelper.getCurrentOrganizationId();
-        return userRepository.searchUsers(organizationFilter, search, pageable)
+        UUID branchFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBranchId();
+        UUID customerFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerId();
+        UUID locationFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerLocationId();
+        return userRepository.searchUsers(organizationFilter, branchFilter, customerFilter, locationFilter, search, pageable)
                 .map(this::toResponse);
     }
 
@@ -88,6 +105,14 @@ public class UserServiceImpl implements UserService {
 
         User user = new User();
         user.setOrganizationId(organizationId);
+        user.setUserType(request.userType());
+        if (request.userType() == com.company.orderapproval.user.entity.UserType.CUSTOMER && request.businessCustomerId() == null) {
+            throw new BadRequestException("businessCustomerId is required for CUSTOMER users");
+        }
+        if (request.userType() == com.company.orderapproval.user.entity.UserType.EMPLOYEE && request.businessCustomerId() != null) {
+            throw new BadRequestException("EMPLOYEE users cannot be assigned to a business customer");
+        }
+        applyPlacement(user, organizationId, request.branchId(), request.businessCustomerId(), request.businessCustomerLocationId());
         user.setFirstName(request.firstName().trim());
         user.setLastName(request.lastName().trim());
         user.setEmail(email);
@@ -184,7 +209,54 @@ public class UserServiceImpl implements UserService {
                 && !SecurityContextHelper.getCurrentOrganizationId().equals(user.getOrganizationId())) {
             throw new ForbiddenException("Cannot access users from another organization");
         }
+        if (!SecurityContextHelper.isSuperAdmin() && currentUserBranchId() != null
+                && !currentUserBranchId().equals(user.getBranchId())) {
+            throw new ForbiddenException("Cannot access users from another branch");
+        }
+        UUID currentCustomerId = currentUserBusinessCustomerId();
+        if (!SecurityContextHelper.isSuperAdmin() && currentCustomerId != null
+                && !currentCustomerId.equals(user.getBusinessCustomerId())) {
+            throw new ForbiddenException("Cannot access users from another business customer");
+        }
         return user;
+    }
+
+    private void applyPlacement(User user, UUID organizationId, UUID branchId, UUID businessCustomerId, UUID businessCustomerLocationId) {
+        if (branchId == null && businessCustomerId == null && businessCustomerLocationId == null) return;
+        if (branchId == null) throw new BadRequestException("branchId is required when assigning a business customer");
+        Branch branch = branchRepository.findById(branchId).orElseThrow(() -> new ResourceNotFoundException("Branch not found"));
+        if (!organizationId.equals(branch.getOrganizationId())) throw new ForbiddenException("Branch belongs to another organization");
+        UUID currentBranchId = SecurityContextHelper.isSuperAdmin() ? null : currentUserBranchId();
+        if (currentBranchId != null && !currentBranchId.equals(branchId)) {
+            throw new ForbiddenException("Cannot assign a user to another branch");
+        }
+        user.setBranchId(branchId);
+        if (businessCustomerId != null) {
+            BusinessCustomer customer = businessCustomerRepository.findById(businessCustomerId).orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+            if (!branchId.equals(customer.getBranchId())) throw new ForbiddenException("Business customer belongs to another branch");
+            user.setBusinessCustomerId(businessCustomerId);
+        }
+        if (businessCustomerLocationId != null) {
+            if (businessCustomerId == null) throw new BadRequestException("businessCustomerId is required when assigning a location");
+            BusinessCustomerLocation location = businessCustomerLocationRepository.findById(businessCustomerLocationId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Business customer location not found"));
+            if (!branchId.equals(location.getBranchId()) || !businessCustomerId.equals(location.getBusinessCustomerId())) {
+                throw new ForbiddenException("Business customer location belongs to another customer or branch");
+            }
+            user.setBusinessCustomerLocationId(location.getId());
+        }
+    }
+
+    private UUID currentUserBranchId() {
+        return userRepository.findById(SecurityContextHelper.getCurrentUserId()).map(User::getBranchId).orElse(null);
+    }
+
+    private UUID currentUserBusinessCustomerId() {
+        return userRepository.findById(SecurityContextHelper.getCurrentUserId()).map(User::getBusinessCustomerId).orElse(null);
+    }
+
+    private UUID currentUserBusinessCustomerLocationId() {
+        return userRepository.findById(SecurityContextHelper.getCurrentUserId()).map(User::getBusinessCustomerLocationId).orElse(null);
     }
 
     private UUID resolveOrganizationId(UUID requestedOrganizationId) {
@@ -210,6 +282,13 @@ public class UserServiceImpl implements UserService {
     }
 
     private void validateRoleAssignableToUser(User user, Role role) {
+        if (("CUSTOMER".equals(role.getName()) || "CUSTOMER_ADMIN".equals(role.getName()))
+                && user.getBusinessCustomerId() == null) {
+            throw new BadRequestException("Customer users must be assigned to a business customer");
+        }
+        if ("EMPLOYEE".equals(role.getName()) && user.getBusinessCustomerId() != null) {
+            throw new BadRequestException("Employees cannot be assigned to a business customer");
+        }
         if ("SUPER_ADMIN".equals(role.getName()) && !SecurityContextHelper.isSuperAdmin()) {
             throw new ForbiddenException("Only super admins may assign SUPER_ADMIN");
         }

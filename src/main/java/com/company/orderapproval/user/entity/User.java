@@ -33,6 +33,19 @@ public class User {
     @Column(name = "organization_id", nullable = false)
     private UUID organizationId;
 
+    @Column(name = "branch_id")
+    private UUID branchId;
+
+    @Column(name = "business_customer_id")
+    private UUID businessCustomerId;
+
+    @Column(name = "business_customer_location_id")
+    private UUID businessCustomerLocationId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "user_type", length = 32)
+    private UserType userType;
+
     @Column(name = "first_name", nullable = false, length = 120)
     private String firstName;
 

@@ -19,6 +19,10 @@ public interface UserMapper {
         return new UserResponse(
                 base.id(),
                 base.organizationId(),
+                base.branchId(),
+                base.businessCustomerId(),
+                base.businessCustomerLocationId(),
+                base.userType(),
                 base.firstName(),
                 base.lastName(),
                 base.email(),

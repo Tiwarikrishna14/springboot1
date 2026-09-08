@@ -1,0 +1,3 @@
+package com.company.orderapproval.customer.service;
+import com.company.orderapproval.customer.dto.*; import com.company.orderapproval.customer.entity.BusinessCustomerStatus; import org.springframework.data.domain.*; import jakarta.servlet.http.HttpServletRequest; import java.util.UUID;
+public interface BusinessCustomerService { Page<BusinessCustomerResponse> list(UUID organizationId,UUID branchId,String city,BusinessCustomerStatus status,String search,Pageable p); BusinessCustomerResponse get(UUID id); BusinessCustomerResponse create(UUID branchId,CreateBusinessCustomerRequest r,HttpServletRequest h); BusinessCustomerResponse update(UUID id,UpdateBusinessCustomerRequest r,HttpServletRequest h); }

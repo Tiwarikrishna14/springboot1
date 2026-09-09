@@ -44,7 +44,7 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                // .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint((request, response, authException) -> writeSecurityError(
@@ -80,11 +80,11 @@ public class SecurityConfig {
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        List<String> allowedOrigins = corsProperties.allowedOriginList();
-        if (allowedOrigins.contains("*")) {
-            throw new IllegalStateException("Do not use wildcard CORS origins with credentials enabled");
-        }
-        configuration.setAllowedOrigins(allowedOrigins);
+        // List<String> allowedOrigins = corsProperties.allowedOriginList();
+        // if (allowedOrigins.contains("*")) {
+        //     throw new IllegalStateException("Do not use wildcard CORS origins with credentials enabled");
+        // }
+        // configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
         configuration.setExposedHeaders(List.of("Authorization"));

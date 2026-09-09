@@ -41,7 +41,7 @@ public class ProductService {
          */
         boolean customerExists =
                 businessCustomerRepository
-                        .existsByCustomerSellCode(customerSellCode);
+                        .existsByCustomerCode(customerSellCode);
 
         if (!customerExists) {
             throw new ResponseStatusException(
@@ -112,7 +112,7 @@ public class ProductService {
 
             // 1. Validate Customer Seller Code
             boolean customerExists =
-                    businessCustomerRepository.existsByCustomerSellCode(
+                    businessCustomerRepository.existsByCustomerCode(
                             customerSellCode
                     );
 

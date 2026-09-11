@@ -5,8 +5,10 @@ import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
 import com.company.orderapproval.product.dto.CreateProductRequest;
 import com.company.orderapproval.product.dto.ProductResponse;
 import com.company.orderapproval.product.entity.Product;
+
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,6 +21,9 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Service
 @RequiredArgsConstructor
@@ -259,4 +264,19 @@ public class ProductService {
 
             return "Updated successfully";
         }
-    }
+    
+
+        public Page<ProductResponse> getProducts(
+        String customerCode,
+        Pageable pageable) {
+
+        Page<Product> products =
+            productRepository.findByCustomerCode(customerCode, pageable);
+
+        return products.map(this::toResponse);
+}
+
+
+}
+
+  

@@ -1,10 +1,50 @@
 package com.company.orderapproval.branch.controller;
-import com.company.orderapproval.branch.dto.*; import com.company.orderapproval.branch.service.BranchService; import com.company.orderapproval.common.response.*; import jakarta.servlet.http.HttpServletRequest; import jakarta.validation.Valid; import org.springframework.data.domain.*; import org.springframework.data.web.PageableDefault; import org.springframework.http.*; import org.springframework.security.access.prepost.PreAuthorize; import org.springframework.web.bind.annotation.*; import java.util.UUID;
-@RestController @RequestMapping("/api/v1/branches") public class BranchController { private final BranchService service; public BranchController(BranchService service){this.service=service;}
- @GetMapping @PreAuthorize("hasAuthority('BRANCH_VIEW')") public ResponseEntity<ApiResponse<PageResponse<BranchResponse>>> list(@RequestParam(required=false) UUID organizationId,@PageableDefault(size=20,sort="createdAt",direction=Sort.Direction.DESC) Pageable p){return ResponseEntity.ok(ApiResponse.success("Branches fetched successfully",PageResponse.from(service.list(organizationId,p))));}
- @GetMapping("/{id}") @PreAuthorize("hasAuthority('BRANCH_VIEW')") public ResponseEntity<ApiResponse<BranchResponse>> get(@PathVariable UUID id){return ResponseEntity.ok(ApiResponse.success("Branch fetched successfully",service.get(id)));}
- @PostMapping @PreAuthorize("hasAuthority('BRANCH_CREATE')") public ResponseEntity<ApiResponse<BranchResponse>> create(@RequestParam UUID organizationId,@Valid @RequestBody CreateBranchRequest r,HttpServletRequest h){
- return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Branch created successfully",service.create(organizationId,r,h)));
-}
- @PutMapping("/{id}") @PreAuthorize("hasAuthority('BRANCH_UPDATE')") public ResponseEntity<ApiResponse<BranchResponse>> update(@PathVariable UUID id,@Valid @RequestBody UpdateBranchRequest r,HttpServletRequest h){return ResponseEntity.ok(ApiResponse.success("Branch updated successfully",service.update(id,r,h)));}
+
+import com.company.orderapproval.branch.dto.*;
+import com.company.orderapproval.branch.service.BranchService;
+import com.company.orderapproval.common.response.*;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.data.domain.*;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.http.*;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/v1/branches")
+public class BranchController {
+
+    private final BranchService service;
+
+    public BranchController(BranchService service) {
+        this.service = service;
+    }
+
+    @GetMapping
+    @PreAuthorize("hasAuthority('BRANCH_VIEW')")
+    public ResponseEntity<ApiResponse<PageResponse<BranchResponse>>> list(@RequestParam(required = false) UUID organizationId, @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable p) {
+        return ResponseEntity.ok(ApiResponse
+            .success("Branches fetched successfully", 
+            PageResponse.from(service.list(organizationId, p))));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('BRANCH_VIEW')")
+    public ResponseEntity<ApiResponse<BranchResponse>> get(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success("Branch fetched successfully", service.get(id)));
+    }
+
+    @PostMapping
+    @PreAuthorize("hasAuthority('BRANCH_CREATE')")
+    public ResponseEntity<ApiResponse<BranchResponse>> create(@RequestParam UUID organizationId, @Valid @RequestBody CreateBranchRequest r, HttpServletRequest h) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Branch created successfully", service.create(organizationId, r, h)));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('BRANCH_UPDATE')")
+    public ResponseEntity<ApiResponse<BranchResponse>> update(@PathVariable UUID id, @Valid @RequestBody UpdateBranchRequest r, HttpServletRequest h) {
+        return ResponseEntity.ok(ApiResponse.success("Branch updated successfully", service.update(id, r, h)));
+    }
 }

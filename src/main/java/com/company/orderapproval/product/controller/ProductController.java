@@ -1,11 +1,16 @@
 package com.company.orderapproval.product.controller;
 
+import com.company.orderapproval.branch.dto.BranchResponse;
 import com.company.orderapproval.common.response.ApiResponse;
+import com.company.orderapproval.common.response.PageResponse;
 import com.company.orderapproval.product.dto.CreateProductRequest;
 import com.company.orderapproval.product.dto.ProductResponse;
 import com.company.orderapproval.product.service.ProductService;
+
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -14,8 +19,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+
 @RestController
-@RequestMapping("/api/products")
+@RequestMapping("/api/v1")
 @RequiredArgsConstructor
 public class ProductController {
 
@@ -24,7 +32,7 @@ public class ProductController {
     /**
      * Create single product
      */
-    @PostMapping
+    @PostMapping("/products")
     public ResponseEntity<ProductResponse> createProduct(
             @Valid @RequestBody CreateProductRequest request) {
 
@@ -34,6 +42,18 @@ public class ProductController {
                 .status(HttpStatus.CREATED)
                 .body(response);
     }
+
+        @PostMapping("/list-products")
+    public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> listOfProducts(@RequestParam String customerCode,
+             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable p) {
+        PageResponse<ProductResponse> response = PageResponse.from(productService.getProducts(customerCode, p));
+        return ResponseEntity.ok(ApiResponse
+            .success("Product for this customer fetched successfully", 
+            response));
+
+    }
+
+    
 
     /**
      * Bulk upload products using CSV

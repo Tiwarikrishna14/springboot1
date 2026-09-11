@@ -1,8 +1,49 @@
 package com.company.orderapproval.customer.controller;
-import com.company.orderapproval.common.response.*; import com.company.orderapproval.customer.dto.*; import com.company.orderapproval.customer.entity.BusinessCustomerStatus; import com.company.orderapproval.customer.service.BusinessCustomerService; import jakarta.servlet.http.HttpServletRequest; import jakarta.validation.Valid; import org.springframework.data.domain.*; import org.springframework.data.web.PageableDefault; import org.springframework.http.*; import org.springframework.security.access.prepost.PreAuthorize; import org.springframework.web.bind.annotation.*; import java.util.UUID;
-@RestController @RequestMapping("/api/v1/business-customers") public class BusinessCustomerController {private final BusinessCustomerService service;public BusinessCustomerController(BusinessCustomerService service){this.service=service;}
- @GetMapping @PreAuthorize("hasAuthority('CUSTOMER_VIEW')") public ResponseEntity<ApiResponse<PageResponse<BusinessCustomerResponse>>> list(@RequestParam(required=false) UUID organizationId,@RequestParam(required=false) UUID branchId,@RequestParam(required=false) String city,@RequestParam(required=false) BusinessCustomerStatus status,@RequestParam(required=false) String search,@PageableDefault(size=20,sort="createdAt",direction=Sort.Direction.DESC) Pageable p){return ResponseEntity.ok(ApiResponse.success("Business customers fetched successfully",PageResponse.from(service.list(organizationId,branchId,city,status,search,p))));}
- @GetMapping("/{id}") @PreAuthorize("hasAuthority('CUSTOMER_VIEW')") public ResponseEntity<ApiResponse<BusinessCustomerResponse>> get(@PathVariable UUID id){return ResponseEntity.ok(ApiResponse.success("Business customer fetched successfully",service.get(id)));}
- @PostMapping @PreAuthorize("hasAuthority('CUSTOMER_CREATE')") public ResponseEntity<ApiResponse<BusinessCustomerResponse>> create(@RequestParam UUID branchId,@Valid @RequestBody CreateBusinessCustomerRequest r,HttpServletRequest h){return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Business customer created successfully",service.create(branchId,r,h)));}
- @PutMapping("/{id}") @PreAuthorize("hasAuthority('CUSTOMER_UPDATE')") public ResponseEntity<ApiResponse<BusinessCustomerResponse>> update(@PathVariable UUID id,@Valid @RequestBody UpdateBusinessCustomerRequest r,HttpServletRequest h){return ResponseEntity.ok(ApiResponse.success("Business customer updated successfully",service.update(id,r,h)));}
+
+import com.company.orderapproval.common.response.*;
+import com.company.orderapproval.customer.dto.*;
+import com.company.orderapproval.customer.entity.BusinessCustomerStatus;
+import com.company.orderapproval.customer.service.BusinessCustomerService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.data.domain.*;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.http.*;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/v1/business-customers")
+public class BusinessCustomerController {
+
+    private final BusinessCustomerService service;
+
+    public BusinessCustomerController(BusinessCustomerService service) {
+        this.service = service;
+    }
+
+    @GetMapping
+    @PreAuthorize("hasAuthority('CUSTOMER_VIEW')")
+    public ResponseEntity<ApiResponse<PageResponse<BusinessCustomerResponse>>> list(@RequestParam(required = false) UUID organizationId, @RequestParam(required = false) UUID branchId, @RequestParam(required = false) String city, @RequestParam(required = false) BusinessCustomerStatus status, @RequestParam(required = false) String search, @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable p) {
+        return ResponseEntity.ok(ApiResponse.success("Business customers fetched successfully", PageResponse.from(service.list(organizationId, branchId, city, status, search, p))));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('CUSTOMER_VIEW')")
+    public ResponseEntity<ApiResponse<BusinessCustomerResponse>> get(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success("Business customer fetched successfully", service.get(id)));
+    }
+
+    @PostMapping
+    @PreAuthorize("hasAuthority('CUSTOMER_CREATE')")
+    public ResponseEntity<ApiResponse<BusinessCustomerResponse>> create(@RequestParam UUID branchId, @Valid @RequestBody CreateBusinessCustomerRequest r, HttpServletRequest h) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Business customer created successfully", service.create(branchId, r, h)));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('CUSTOMER_UPDATE')")
+    public ResponseEntity<ApiResponse<BusinessCustomerResponse>> update(@PathVariable UUID id, @Valid @RequestBody UpdateBusinessCustomerRequest r, HttpServletRequest h) {
+        return ResponseEntity.ok(ApiResponse.success("Business customer updated successfully", service.update(id, r, h)));
+    }
 }

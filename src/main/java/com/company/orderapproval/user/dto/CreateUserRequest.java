@@ -2,6 +2,7 @@ package com.company.orderapproval.user.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -18,6 +19,7 @@ public record CreateUserRequest(
 
         UUID businessCustomerLocationId,
 
+        @NotNull(message = "User type is required")
         UserType userType,
 
         @NotBlank(message = "First name is required")

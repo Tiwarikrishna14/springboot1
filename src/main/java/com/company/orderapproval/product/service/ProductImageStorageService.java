@@ -56,6 +56,29 @@ public class ProductImageStorageService {
         }
     }
 
+    public void delete(String imagePath) {
+        if (imagePath == null || imagePath.isBlank()) {
+            return;
+        }
+
+        String normalizedPath = imagePath.trim().replace('\\', '/');
+        if (!normalizedPath.startsWith(properties.pathPrefix() + "/")) {
+            return;
+        }
+
+        Path uploadRoot = properties.uploadPath();
+        Path imageFile = uploadRoot.resolve(cleanFilename(normalizedPath)).normalize();
+        if (!imageFile.startsWith(uploadRoot)) {
+            return;
+        }
+
+        try {
+            Files.deleteIfExists(imageFile);
+        } catch (IOException ignored) {
+            // Product records should still update/delete if old image cleanup fails.
+        }
+    }
+
     public Map<String, MultipartFile> indexByOriginalFilename(List<MultipartFile> images) {
         if (images == null || images.isEmpty()) {
             return Map.of();

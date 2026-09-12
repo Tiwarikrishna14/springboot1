@@ -10,6 +10,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 interface ProductRepository extends JpaRepository<Product, Long> {
 
     boolean existsByCustomerSellCodeAndNavItemCode( String customerSellCode, String navItemCode );
-        Page<Product> findByCustomerSellCode(String customerCode, Pageable pageable);
+
+    boolean existsByCustomerSellCodeAndNavItemCodeAndIdNot(String customerSellCode, String navItemCode, Long id);
+
+    Page<Product> findByCustomerSellCode(String customerCode, Pageable pageable);
 
 }

@@ -45,10 +45,11 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER_VIEW')")
     public ResponseEntity<ApiResponse<PageResponse<UserResponse>>> list(
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) UUID branchId,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
                 "Users fetched successfully",
-                PageResponse.from(userService.list(search, pageable))
+                PageResponse.from(userService.list(search, branchId, pageable))
         ));
     }
 

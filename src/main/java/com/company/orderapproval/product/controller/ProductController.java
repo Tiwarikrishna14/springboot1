@@ -3,7 +3,9 @@ package com.company.orderapproval.product.controller;
 import com.company.orderapproval.common.response.ApiResponse;
 import com.company.orderapproval.common.response.PageResponse;
 import com.company.orderapproval.product.dto.CreateProductRequest;
+import com.company.orderapproval.product.dto.DeleteProductsRequest;
 import com.company.orderapproval.product.dto.ProductResponse;
+import com.company.orderapproval.product.dto.UpdateProductRequest;
 import com.company.orderapproval.product.service.ProductService;
 
 import jakarta.validation.Valid;
@@ -66,7 +68,48 @@ public class ProductController {
 
     }
 
-    
+    @PutMapping(value = "/products/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateProductRequest request) {
+
+        return ResponseEntity.ok(ApiResponse.success(
+                "Product updated successfully",
+                productService.updateProduct(id, request)
+        ));
+    }
+
+    @PutMapping(value = "/products/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ProductResponse>> updateProductWithImage(
+            @PathVariable Long id,
+            @Valid @ModelAttribute UpdateProductRequest request,
+            @RequestParam(value = "image", required = false) MultipartFile image) {
+
+        return ResponseEntity.ok(ApiResponse.success(
+                "Product updated successfully",
+                productService.updateProduct(id, request, image)
+        ));
+    }
+
+    @DeleteMapping("/products")
+    public ResponseEntity<ApiResponse<Integer>> deleteProducts(
+            @Valid @RequestBody DeleteProductsRequest request) {
+
+        return ResponseEntity.ok(ApiResponse.success(
+                "Products deleted successfully",
+                productService.deleteProducts(request.ids())
+        ));
+    }
+
+    @PostMapping("/products/bulk-delete")
+    public ResponseEntity<ApiResponse<Integer>> bulkDeleteProducts(
+            @Valid @RequestBody DeleteProductsRequest request) {
+
+        return ResponseEntity.ok(ApiResponse.success(
+                "Products deleted successfully",
+                productService.deleteProducts(request.ids())
+        ));
+    }
 
     /**
      * Bulk upload products using CSV

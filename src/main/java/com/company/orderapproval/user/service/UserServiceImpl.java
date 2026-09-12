@@ -24,6 +24,7 @@ import com.company.orderapproval.user.dto.UserResponse;
 import com.company.orderapproval.user.entity.User;
 import com.company.orderapproval.user.entity.UserRole;
 import com.company.orderapproval.user.entity.UserStatus;
+import com.company.orderapproval.user.entity.UserType;
 import com.company.orderapproval.user.mapper.UserMapper;
 import com.company.orderapproval.user.repository.UserRepository;
 import com.company.orderapproval.user.repository.UserRoleRepository;
@@ -74,11 +75,11 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Page<UserResponse> list(String search, Pageable pageable) {
+    public Page<UserResponse> list(String search, UUID branchId, Pageable pageable) {
         UUID organizationFilter = SecurityContextHelper.isSuperAdmin()
                 ? null
                 : SecurityContextHelper.getCurrentOrganizationId();
-        UUID branchFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBranchId();
+        UUID branchFilter = resolveBranchFilter(branchId);
         UUID customerFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerId();
         UUID locationFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerLocationId();
         return userRepository.searchUsers(organizationFilter, branchFilter, customerFilter, locationFilter, search, pageable)
@@ -106,12 +107,12 @@ public class UserServiceImpl implements UserService {
         User user = new User();
         user.setOrganizationId(organizationId);
         user.setUserType(request.userType());
-        if (request.userType() == com.company.orderapproval.user.entity.UserType.CUSTOMER && request.businessCustomerId() == null) {
-            throw new BadRequestException("businessCustomerId is required for CUSTOMER users");
-        }
-        if (request.userType() == com.company.orderapproval.user.entity.UserType.EMPLOYEE && request.businessCustomerId() != null) {
-            throw new BadRequestException("EMPLOYEE users cannot be assigned to a business customer");
-        }
+        validatePlacementForUserType(
+                request.userType(),
+                request.branchId(),
+                request.businessCustomerId(),
+                request.businessCustomerLocationId()
+        );
         applyPlacement(user, organizationId, request.branchId(), request.businessCustomerId(), request.businessCustomerLocationId());
         user.setFirstName(request.firstName().trim());
         user.setLastName(request.lastName().trim());
@@ -247,6 +248,53 @@ public class UserServiceImpl implements UserService {
         }
     }
 
+    private void validatePlacementForUserType(UserType userType, UUID branchId, UUID businessCustomerId, UUID businessCustomerLocationId) {
+        if (userType == null) {
+            throw new BadRequestException("User type is required");
+        }
+        if (userType == UserType.EMPLOYEE) {
+            if (branchId == null) {
+                throw new BadRequestException("branchId is required for EMPLOYEE users");
+            }
+            if (businessCustomerId != null || businessCustomerLocationId != null) {
+                throw new BadRequestException("EMPLOYEE users cannot be assigned to a business customer or location");
+            }
+        }
+        if (userType == UserType.CUSTOMER) {
+            if (branchId == null) {
+                throw new BadRequestException("branchId is required for CUSTOMER users");
+            }
+            if (businessCustomerId == null) {
+                throw new BadRequestException("businessCustomerId is required for CUSTOMER users");
+            }
+        }
+    }
+
+    private UUID resolveBranchFilter(UUID requestedBranchId) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return requestedBranchId;
+        }
+
+        UUID currentBranchId = currentUserBranchId();
+        if (currentBranchId != null) {
+            if (requestedBranchId != null && !requestedBranchId.equals(currentBranchId)) {
+                throw new ForbiddenException("Cannot access users from another branch");
+            }
+            return currentBranchId;
+        }
+
+        if (requestedBranchId == null) {
+            return null;
+        }
+
+        Branch branch = branchRepository.findById(requestedBranchId)
+                .orElseThrow(() -> new ResourceNotFoundException("Branch not found"));
+        if (!SecurityContextHelper.getCurrentOrganizationId().equals(branch.getOrganizationId())) {
+            throw new ForbiddenException("Cannot access users from another organization");
+        }
+        return requestedBranchId;
+    }
+
     private UUID currentUserBranchId() {
         return userRepository.findById(SecurityContextHelper.getCurrentUserId()).map(User::getBranchId).orElse(null);
     }
@@ -288,6 +336,10 @@ public class UserServiceImpl implements UserService {
         }
         if ("EMPLOYEE".equals(role.getName()) && user.getBusinessCustomerId() != null) {
             throw new BadRequestException("Employees cannot be assigned to a business customer");
+        }
+        if ("BRANCH_ADMIN".equals(role.getName())
+                && (user.getUserType() != UserType.EMPLOYEE || user.getBranchId() == null || user.getBusinessCustomerId() != null)) {
+            throw new BadRequestException("Branch admin users must be EMPLOYEE users assigned to a branch");
         }
         if ("SUPER_ADMIN".equals(role.getName()) && !SecurityContextHelper.isSuperAdmin()) {
             throw new ForbiddenException("Only super admins may assign SUPER_ADMIN");

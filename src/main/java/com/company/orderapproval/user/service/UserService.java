@@ -12,7 +12,7 @@ import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 
 public interface UserService {
-    Page<UserResponse> list(String search, Pageable pageable);
+    Page<UserResponse> list(String search, UUID branchId, Pageable pageable);
 
     UserResponse get(UUID id);
 

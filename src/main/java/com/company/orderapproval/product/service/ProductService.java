@@ -1,9 +1,11 @@
 package com.company.orderapproval.product.service;
 
 import com.company.orderapproval.common.exception.BadRequestException;
+import com.company.orderapproval.common.exception.ResourceNotFoundException;
 import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
 import com.company.orderapproval.product.dto.CreateProductRequest;
 import com.company.orderapproval.product.dto.ProductResponse;
+import com.company.orderapproval.product.dto.UpdateProductRequest;
 import com.company.orderapproval.product.entity.Product;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -112,6 +114,71 @@ public class ProductService {
         return "Updated successfully";
     }
 
+    @Transactional
+    public ProductResponse updateProduct(Long id, UpdateProductRequest request) {
+        return updateProduct(id, request, null);
+    }
+
+    @Transactional
+    public ProductResponse updateProduct(Long id, UpdateProductRequest request, MultipartFile image) {
+        Product product = findProduct(id);
+        String customerSellCode = cleanRequired(request.customerSellCode(), "Customer seller code");
+        String navItemCode = cleanRequired(request.navItemCode(), "NAV item code");
+
+        validateCustomer(customerSellCode);
+        ensureProductDoesNotExistForUpdate(customerSellCode, navItemCode, id);
+
+        String oldImagePath = product.getImagePath();
+        String newImagePath = oldImagePath;
+        String storedImagePath = productImageStorageService.store(image);
+        if (storedImagePath != null) {
+            newImagePath = storedImagePath;
+        } else if (Boolean.TRUE.equals(request.removeImage())) {
+            newImagePath = null;
+        }
+
+        product.setCategory(cleanRequired(request.category(), "Category"));
+        product.setCustomerSellCode(customerSellCode);
+        product.setNavItemCode(navItemCode);
+        product.setItemDescription(cleanRequired(request.itemDescription(), "Item description"));
+        product.setUom(cleanRequired(request.uom(), "UOM"));
+        product.setUnitRate(request.unitRate());
+        product.setStatus(cleanRequired(request.status(), "Status").toUpperCase(Locale.ROOT));
+        product.setImagePath(newImagePath);
+
+        Product savedProduct = productRepository.save(product);
+        if (oldImagePath != null && !oldImagePath.equals(newImagePath)) {
+            productImageStorageService.delete(oldImagePath);
+        }
+
+        return toResponse(savedProduct);
+    }
+
+    @Transactional
+    public int deleteProducts(List<Long> ids) {
+        List<Long> productIds = normalizeProductIds(ids);
+        List<Product> products = productRepository.findAllById(productIds);
+
+        if (products.size() != productIds.size()) {
+            Set<Long> foundIds = new HashSet<>();
+            for (Product product : products) {
+                foundIds.add(product.getId());
+            }
+
+            List<Long> missingIds = productIds.stream()
+                    .filter(productId -> !foundIds.contains(productId))
+                    .toList();
+            throw new ResourceNotFoundException("Products not found: " + missingIds);
+        }
+
+        productRepository.deleteAll(products);
+        for (Product product : products) {
+            productImageStorageService.delete(product.getImagePath());
+        }
+
+        return products.size();
+    }
+
     public Page<ProductResponse> getProducts(String customerCode, Pageable pageable) {
         Page<Product> products = productRepository.findByCustomerSellCode(customerCode, pageable);
         return products.map(this::toResponse);
@@ -137,6 +204,14 @@ public class ProductService {
         }
     }
 
+    private Product findProduct(Long id) {
+        if (id == null) {
+            throw new BadRequestException("Product id is mandatory");
+        }
+        return productRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+    }
+
     private void ensureProductDoesNotExist(String customerSellCode, String navItemCode, Integer rowNumber) {
         boolean duplicate = productRepository.existsByCustomerSellCodeAndNavItemCode(customerSellCode, navItemCode);
         if (duplicate) {
@@ -148,6 +223,22 @@ public class ProductService {
                 message += " at row " + rowNumber;
             }
             throw new BadRequestException(message);
+        }
+    }
+
+    private void ensureProductDoesNotExistForUpdate(String customerSellCode, String navItemCode, Long productId) {
+        boolean duplicate = productRepository.existsByCustomerSellCodeAndNavItemCodeAndIdNot(
+                customerSellCode,
+                navItemCode,
+                productId
+        );
+        if (duplicate) {
+            throw new BadRequestException(
+                    "Product already exists for customer seller code "
+                            + customerSellCode
+                            + " and NAV item code "
+                            + navItemCode
+            );
         }
     }
 
@@ -286,6 +377,27 @@ public class ProductService {
             return null;
         }
         return value.trim();
+    }
+
+    private List<Long> normalizeProductIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BadRequestException("Product ids are mandatory");
+        }
+
+        List<Long> productIds = new ArrayList<>();
+        Set<Long> seenIds = new HashSet<>();
+        for (Long id : ids) {
+            if (id == null) {
+                throw new BadRequestException("Product id cannot be null");
+            }
+            if (id <= 0) {
+                throw new BadRequestException("Product id must be greater than 0");
+            }
+            if (seenIds.add(id)) {
+                productIds.add(id);
+            }
+        }
+        return productIds;
     }
 
 }

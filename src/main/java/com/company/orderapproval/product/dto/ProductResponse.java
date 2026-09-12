@@ -17,6 +17,8 @@ public record ProductResponse(
 
         BigDecimal unitRate,
 
+        String imagePath,
+
         String status
 ) {
 }

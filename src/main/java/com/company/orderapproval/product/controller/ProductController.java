@@ -1,6 +1,5 @@
 package com.company.orderapproval.product.controller;
 
-import com.company.orderapproval.branch.dto.BranchResponse;
 import com.company.orderapproval.common.response.ApiResponse;
 import com.company.orderapproval.common.response.PageResponse;
 import com.company.orderapproval.product.dto.CreateProductRequest;
@@ -16,7 +15,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.multipart.MultipartHttpServletRequest;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.data.domain.Pageable;
@@ -32,7 +33,7 @@ public class ProductController {
     /**
      * Create single product
      */
-    @PostMapping("/products")
+    @PostMapping(value = "/products", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ProductResponse> createProduct(
             @Valid @RequestBody CreateProductRequest request) {
 
@@ -43,7 +44,19 @@ public class ProductController {
                 .body(response);
     }
 
-        @PostMapping("/list-products")
+    @PostMapping(value = "/products", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ProductResponse> createProductWithImage(
+            @Valid @ModelAttribute CreateProductRequest request,
+            @RequestParam(value = "image", required = false) MultipartFile image) {
+
+        ProductResponse response = productService.createProduct(request, image);
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(response);
+    }
+
+    @PostMapping("/list-products")
     public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> listOfProducts(@RequestParam String customerCode,
              @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable p) {
         PageResponse<ProductResponse> response = PageResponse.from(productService.getProducts(customerCode, p));
@@ -63,8 +76,13 @@ public class ProductController {
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
     public ResponseEntity<ApiResponse<String>> bulkUpload(
-            @RequestParam("file") MultipartFile file, @PathVariable String customerSellCode) {
+            MultipartHttpServletRequest request,
+            @PathVariable String customerSellCode) {
 
-        return ResponseEntity.ok(ApiResponse.success("Upload successfully", productService.bulkUploadProducts(customerSellCode, file)));
+        MultipartFile file = request.getFile("file");
+        List<MultipartFile> images = new ArrayList<>(request.getFiles("images"));
+        images.addAll(request.getFiles("images[]"));
+
+        return ResponseEntity.ok(ApiResponse.success("Upload successfully", productService.bulkUploadProducts(customerSellCode, file, images)));
     }
 }

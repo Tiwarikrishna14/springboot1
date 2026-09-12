@@ -56,3 +56,6 @@ app:
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://localhost:8080}
   password-reset:
     base-url: ${PASSWORD_RESET_BASE_URL:http://localhost:5173/reset-password}
+  product-images:
+    upload-dir: ${PRODUCT_IMAGE_UPLOAD_DIR:uploads/products}
+    path-prefix: /uploads/products

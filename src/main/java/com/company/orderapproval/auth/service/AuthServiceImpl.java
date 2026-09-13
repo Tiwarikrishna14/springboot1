@@ -16,6 +16,7 @@ import com.company.orderapproval.auth.security.CustomUserDetailsService;
 import com.company.orderapproval.auth.security.JwtTokenService;
 import com.company.orderapproval.auth.security.PasswordResetToken;
 import com.company.orderapproval.auth.security.RefreshToken;
+import com.company.orderapproval.branch.repository.BranchRepository;
 import com.company.orderapproval.common.constant.AuditActions;
 import com.company.orderapproval.common.exception.BadRequestException;
 import com.company.orderapproval.common.exception.ConflictException;
@@ -24,6 +25,7 @@ import com.company.orderapproval.common.exception.UnauthorizedException;
 import com.company.orderapproval.common.util.HashUtil;
 import com.company.orderapproval.common.util.IpAddressUtil;
 import com.company.orderapproval.common.util.SecurityContextHelper;
+import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
 import com.company.orderapproval.organization.entity.Organization;
 import com.company.orderapproval.organization.entity.OrganizationStatus;
 import com.company.orderapproval.organization.entity.OrganizationType;
@@ -59,6 +61,8 @@ public class AuthServiceImpl implements AuthService {
     private final UserRoleRepository userRoleRepository;
     private final RoleRepository roleRepository;
     private final OrganizationRepository organizationRepository;
+    private final BranchRepository branchRepository;
+    private final BusinessCustomerRepository businessCustomerRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final PasswordEncoder passwordEncoder;
@@ -73,6 +77,8 @@ public class AuthServiceImpl implements AuthService {
                            UserRoleRepository userRoleRepository,
                            RoleRepository roleRepository,
                            OrganizationRepository organizationRepository,
+                           BranchRepository branchRepository,
+                           BusinessCustomerRepository businessCustomerRepository,
                            RefreshTokenRepository refreshTokenRepository,
                            PasswordResetTokenRepository passwordResetTokenRepository,
                            PasswordEncoder passwordEncoder,
@@ -85,6 +91,8 @@ public class AuthServiceImpl implements AuthService {
         this.userRoleRepository = userRoleRepository;
         this.roleRepository = roleRepository;
         this.organizationRepository = organizationRepository;
+        this.branchRepository = branchRepository;
+        this.businessCustomerRepository = businessCustomerRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -298,10 +306,43 @@ public class AuthServiceImpl implements AuthService {
                 user.getFirstName(),
                 user.getLastName(),
                 user.getEmail(),
+                user.getUserType(),
                 user.getOrganizationId(),
+                organizationName(user.getOrganizationId()),
+                user.getBranchId(),
+                branchName(user.getBranchId()),
+                user.getBusinessCustomerId(),
+                businessCustomerName(user.getBusinessCustomerId()),
                 principal.roles(),
                 principal.permissions()
         );
+    }
+
+    private String organizationName(java.util.UUID organizationId) {
+        if (organizationId == null) {
+            return null;
+        }
+        return organizationRepository.findById(organizationId)
+                .map(organization -> organization.getName())
+                .orElse(null);
+    }
+
+    private String branchName(java.util.UUID branchId) {
+        if (branchId == null) {
+            return null;
+        }
+        return branchRepository.findById(branchId)
+                .map(branch -> branch.getName())
+                .orElse(null);
+    }
+
+    private String businessCustomerName(java.util.UUID businessCustomerId) {
+        if (businessCustomerId == null) {
+            return null;
+        }
+        return businessCustomerRepository.findById(businessCustomerId)
+                .map(customer -> customer.getName())
+                .orElse(null);
     }
 
     private void registerFailedLogin(User user, HttpServletRequest servletRequest) {

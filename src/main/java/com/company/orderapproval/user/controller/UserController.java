@@ -90,6 +90,17 @@ public class UserController {
         ));
     }
 
+    @Operation(summary = "Delete user")
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('USER_DISABLE')")
+    public ResponseEntity<ApiResponse<UserResponse>> delete(@PathVariable UUID id,
+                                                            HttpServletRequest servletRequest) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "User deleted successfully",
+                userService.delete(id, servletRequest)
+        ));
+    }
+
     @Operation(summary = "Assign roles to user")
     @PostMapping("/{id}/roles")
     @PreAuthorize("hasAuthority('ROLE_ASSIGN')")

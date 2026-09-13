@@ -12,15 +12,28 @@ public interface UserMapper {
 
     @Mapping(target = "roles", ignore = true)
     @Mapping(target = "permissions", ignore = true)
+    @Mapping(target = "organizationName", ignore = true)
+    @Mapping(target = "branchName", ignore = true)
+    @Mapping(target = "businessCustomerName", ignore = true)
     UserResponse toResponse(User user);
 
-    default UserResponse toResponse(User user, List<String> roles, List<String> permissions) {
+    default UserResponse toResponse(
+            User user,
+            String organizationName,
+            String branchName,
+            String businessCustomerName,
+            List<String> roles,
+            List<String> permissions
+    ) {
         UserResponse base = toResponse(user);
         return new UserResponse(
                 base.id(),
                 base.organizationId(),
+                organizationName,
                 base.branchId(),
+                branchName,
                 base.businessCustomerId(),
+                businessCustomerName,
                 base.businessCustomerLocationId(),
                 base.userType(),
                 base.firstName(),

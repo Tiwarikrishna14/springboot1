@@ -22,6 +22,8 @@ public interface UserService {
 
     UserResponse updateStatus(UUID id, UpdateUserStatusRequest request, HttpServletRequest servletRequest);
 
+    UserResponse delete(UUID id, HttpServletRequest servletRequest);
+
     UserResponse assignRoles(UUID id, AssignRolesRequest request, HttpServletRequest servletRequest);
 
     UserResponse removeRole(UUID id, UUID roleId, HttpServletRequest servletRequest);

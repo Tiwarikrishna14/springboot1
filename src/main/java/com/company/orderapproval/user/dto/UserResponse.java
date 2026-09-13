@@ -10,8 +10,11 @@ import java.util.UUID;
 public record UserResponse(
         UUID id,
         UUID organizationId,
+        String organizationName,
         UUID branchId,
+        String branchName,
         UUID businessCustomerId,
+        String businessCustomerName,
         UUID businessCustomerLocationId,
         UserType userType,
         String firstName,

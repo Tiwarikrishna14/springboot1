@@ -1,6 +1,7 @@
 package com.company.orderapproval.user.repository;
 
 import com.company.orderapproval.user.entity.User;
+import com.company.orderapproval.user.entity.UserStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -22,6 +23,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
               and (:branchId is null or u.branchId = :branchId)
               and (:businessCustomerId is null or u.businessCustomerId = :businessCustomerId)
               and (:businessCustomerLocationId is null or u.businessCustomerLocationId = :businessCustomerLocationId)
+              and u.status <> :excludedStatus
               and (:search is null or :search = ''
                    or lower(u.firstName) like lower(concat('%', :search, '%'))
                    or lower(u.lastName) like lower(concat('%', :search, '%'))
@@ -31,6 +33,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
                            @Param("branchId") UUID branchId,
                            @Param("businessCustomerId") UUID businessCustomerId,
                            @Param("businessCustomerLocationId") UUID businessCustomerLocationId,
+                           @Param("excludedStatus") UserStatus excludedStatus,
                            @Param("search") String search,
                            Pageable pageable);
 }

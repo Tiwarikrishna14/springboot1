@@ -15,6 +15,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
@@ -36,6 +37,7 @@ public class ProductController {
      * Create single product
      */
     @PostMapping(value = "/products", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('PRODUCT_CREATE')")
     public ResponseEntity<ProductResponse> createProduct(
             @Valid @RequestBody CreateProductRequest request) {
 
@@ -47,6 +49,7 @@ public class ProductController {
     }
 
     @PostMapping(value = "/products", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAuthority('PRODUCT_CREATE')")
     public ResponseEntity<ProductResponse> createProductWithImage(
             @Valid @ModelAttribute CreateProductRequest request,
             @RequestParam(value = "image", required = false) MultipartFile image) {
@@ -59,6 +62,7 @@ public class ProductController {
     }
 
     @PostMapping("/list-products")
+    @PreAuthorize("hasAuthority('PRODUCT_VIEW')")
     public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> listOfProducts(@RequestParam String customerCode,
              @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable p) {
         PageResponse<ProductResponse> response = PageResponse.from(productService.getProducts(customerCode, p));
@@ -69,6 +73,7 @@ public class ProductController {
     }
 
     @PutMapping(value = "/products/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('PRODUCT_UPDATE')")
     public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
             @PathVariable Long id,
             @Valid @RequestBody UpdateProductRequest request) {
@@ -80,6 +85,7 @@ public class ProductController {
     }
 
     @PutMapping(value = "/products/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAuthority('PRODUCT_UPDATE')")
     public ResponseEntity<ApiResponse<ProductResponse>> updateProductWithImage(
             @PathVariable Long id,
             @Valid @ModelAttribute UpdateProductRequest request,
@@ -92,6 +98,7 @@ public class ProductController {
     }
 
     @DeleteMapping("/products")
+    @PreAuthorize("hasAuthority('PRODUCT_DELETE')")
     public ResponseEntity<ApiResponse<Integer>> deleteProducts(
             @Valid @RequestBody DeleteProductsRequest request) {
 
@@ -102,6 +109,7 @@ public class ProductController {
     }
 
     @PostMapping("/products/bulk-delete")
+    @PreAuthorize("hasAuthority('PRODUCT_DELETE')")
     public ResponseEntity<ApiResponse<Integer>> bulkDeleteProducts(
             @Valid @RequestBody DeleteProductsRequest request) {
 
@@ -118,6 +126,7 @@ public class ProductController {
             value = "/{customerSellCode}/bulk-upload",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
+    @PreAuthorize("hasAuthority('PRODUCT_CREATE')")
     public ResponseEntity<ApiResponse<String>> bulkUpload(
             MultipartHttpServletRequest request,
             @PathVariable String customerSellCode) {

@@ -15,7 +15,13 @@ public interface AuthMapper {
                 user.getFirstName(),
                 user.getLastName(),
                 user.getEmail(),
+                user.getUserType(),
                 user.getOrganizationId(),
+                null,
+                user.getBranchId(),
+                null,
+                user.getBusinessCustomerId(),
+                null,
                 roles,
                 permissions
         );

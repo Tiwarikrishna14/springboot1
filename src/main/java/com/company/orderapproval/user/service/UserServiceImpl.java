@@ -1,6 +1,7 @@
 package com.company.orderapproval.user.service;
 
 import com.company.orderapproval.audit.service.AuditService;
+import com.company.orderapproval.auth.repository.RefreshTokenRepository;
 import com.company.orderapproval.common.constant.AuditActions;
 import com.company.orderapproval.common.exception.BadRequestException;
 import com.company.orderapproval.common.exception.ConflictException;
@@ -35,6 +36,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -52,6 +54,7 @@ public class UserServiceImpl implements UserService {
     private final BranchRepository branchRepository;
     private final BusinessCustomerRepository businessCustomerRepository;
     private final BusinessCustomerLocationRepository businessCustomerLocationRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     public UserServiceImpl(UserRepository userRepository,
                            UserRoleRepository userRoleRepository,
@@ -61,7 +64,8 @@ public class UserServiceImpl implements UserService {
                            PasswordEncoder passwordEncoder,
                            AuditService auditService, BranchRepository branchRepository,
                            BusinessCustomerRepository businessCustomerRepository,
-                           BusinessCustomerLocationRepository businessCustomerLocationRepository) {
+                           BusinessCustomerLocationRepository businessCustomerLocationRepository,
+                           RefreshTokenRepository refreshTokenRepository) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.roleRepository = roleRepository;
@@ -72,6 +76,7 @@ public class UserServiceImpl implements UserService {
         this.branchRepository = branchRepository;
         this.businessCustomerRepository = businessCustomerRepository;
         this.businessCustomerLocationRepository = businessCustomerLocationRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
     }
 
     @Override
@@ -82,7 +87,7 @@ public class UserServiceImpl implements UserService {
         UUID branchFilter = resolveBranchFilter(branchId);
         UUID customerFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerId();
         UUID locationFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerLocationId();
-        return userRepository.searchUsers(organizationFilter, branchFilter, customerFilter, locationFilter, search, pageable)
+        return userRepository.searchUsers(organizationFilter, branchFilter, customerFilter, locationFilter, UserStatus.INACTIVE, search, pageable)
                 .map(this::toResponse);
     }
 
@@ -175,6 +180,28 @@ public class UserServiceImpl implements UserService {
         userRepository.save(user);
         auditService.record(AuditActions.USER_STATUS_CHANGED, user.getOrganizationId(), SecurityContextHelper.getCurrentUserId(),
                 "User", user.getId(), "User status changed", oldValues,
+                Map.of("status", user.getStatus().name()), servletRequest);
+        return toResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public UserResponse delete(UUID id, HttpServletRequest servletRequest) {
+        User user = findAccessibleUser(id);
+        UUID currentUserId = SecurityContextHelper.getCurrentUserId();
+        if (user.getId().equals(currentUserId)) {
+            throw new BadRequestException("You cannot delete your own user account");
+        }
+
+        Map<String, Object> oldValues = Map.of("status", user.getStatus().name());
+        user.setStatus(UserStatus.INACTIVE);
+        user.setAccountLockedUntil(null);
+        user.setUpdatedBy(currentUserId);
+        userRepository.save(user);
+        refreshTokenRepository.revokeActiveTokensByUserId(user.getId(), Instant.now());
+
+        auditService.record(AuditActions.USER_DELETED, user.getOrganizationId(), currentUserId,
+                "User", user.getId(), "User soft deleted", oldValues,
                 Map.of("status", user.getStatus().name()), servletRequest);
         return toResponse(user);
     }
@@ -359,9 +386,39 @@ public class UserServiceImpl implements UserService {
     private UserResponse toResponse(User user) {
         return userMapper.toResponse(
                 user,
+                organizationName(user.getOrganizationId()),
+                branchName(user.getBranchId()),
+                businessCustomerName(user.getBusinessCustomerId()),
                 userRoleRepository.findRoleNamesByUserId(user.getId()),
                 userRoleRepository.findPermissionCodesByUserId(user.getId())
         );
+    }
+
+    private String organizationName(UUID organizationId) {
+        if (organizationId == null) {
+            return null;
+        }
+        return organizationRepository.findById(organizationId)
+                .map(organization -> organization.getName())
+                .orElse(null);
+    }
+
+    private String branchName(UUID branchId) {
+        if (branchId == null) {
+            return null;
+        }
+        return branchRepository.findById(branchId)
+                .map(branch -> branch.getName())
+                .orElse(null);
+    }
+
+    private String businessCustomerName(UUID businessCustomerId) {
+        if (businessCustomerId == null) {
+            return null;
+        }
+        return businessCustomerRepository.findById(businessCustomerId)
+                .map(customer -> customer.getName())
+                .orElse(null);
     }
 
     private String normalizeEmail(String email) {

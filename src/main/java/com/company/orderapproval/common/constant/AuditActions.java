@@ -9,6 +9,7 @@ public final class AuditActions {
     public static final String USER_CREATED = "USER_CREATED";
     public static final String USER_UPDATED = "USER_UPDATED";
     public static final String USER_STATUS_CHANGED = "USER_STATUS_CHANGED";
+    public static final String USER_DELETED = "USER_DELETED";
     public static final String ROLE_CREATED = "ROLE_CREATED";
     public static final String ROLE_UPDATED = "ROLE_UPDATED";
     public static final String ROLE_ASSIGNED = "ROLE_ASSIGNED";

@@ -18,6 +18,7 @@ import com.company.orderapproval.customer.location.repository.BusinessCustomerLo
 import com.company.orderapproval.role.entity.Role;
 import com.company.orderapproval.role.repository.RoleRepository;
 import com.company.orderapproval.user.dto.AssignRolesRequest;
+import com.company.orderapproval.user.dto.ApproverUserResponse;
 import com.company.orderapproval.user.dto.CreateUserRequest;
 import com.company.orderapproval.user.dto.UpdateUserRequest;
 import com.company.orderapproval.user.dto.UpdateUserStatusRequest;
@@ -37,8 +38,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -80,15 +84,55 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Page<UserResponse> list(String search, UUID branchId, Pageable pageable) {
+    public Page<UserResponse> list(String search,
+                                   UUID branchId,
+                                   UUID businessCustomerId,
+                                   UUID businessCustomerLocationId,
+                                   UserStatus status,
+                                   List<String> roles,
+                                   Pageable pageable) {
+        User currentUser = currentUser();
         UUID organizationFilter = SecurityContextHelper.isSuperAdmin()
                 ? null
-                : SecurityContextHelper.getCurrentOrganizationId();
-        UUID branchFilter = resolveBranchFilter(branchId);
-        UUID customerFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerId();
-        UUID locationFilter = SecurityContextHelper.isSuperAdmin() ? null : currentUserBusinessCustomerLocationId();
-        return userRepository.searchUsers(organizationFilter, branchFilter, customerFilter, locationFilter, UserStatus.INACTIVE, search, pageable)
+                : currentUser.getOrganizationId();
+        UUID branchFilter = resolveBranchFilter(branchId, currentUser);
+        UUID customerFilter = resolveBusinessCustomerFilter(businessCustomerId, branchFilter, currentUser);
+        UUID locationFilter = resolveLocationFilter(businessCustomerLocationId, customerFilter, branchFilter, currentUser);
+        List<String> normalizedRoles = normalizeRoles(roles);
+        boolean roleNamesEmpty = normalizedRoles.isEmpty();
+        List<String> roleNames = roleNamesEmpty ? List.of("__NO_ROLE_FILTER__") : normalizedRoles;
+        return userRepository.searchUsers(
+                        organizationFilter,
+                        branchFilter,
+                        customerFilter,
+                        locationFilter,
+                        status,
+                        UserStatus.INACTIVE,
+                        roleNamesEmpty,
+                        roleNames,
+                        search,
+                        pageable
+                )
                 .map(this::toResponse);
+    }
+
+    @Override
+    public List<ApproverUserResponse> approvers(UUID businessCustomerId) {
+        if (businessCustomerId == null) {
+            throw new BadRequestException("businessCustomerId is required");
+        }
+        BusinessCustomer customer = businessCustomerRepository.findById(businessCustomerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+        assertBusinessCustomerAccessible(customer, currentUser());
+
+        return userRepository.findApproverUsersByBusinessCustomerId(
+                        businessCustomerId,
+                        UserStatus.ACTIVE,
+                        "ORDER_APPROVE"
+                )
+                .stream()
+                .map(user -> new ApproverUserResponse(user.getId(), fullName(user), user.getEmail()))
+                .toList();
     }
 
     @Override
@@ -297,12 +341,12 @@ public class UserServiceImpl implements UserService {
         }
     }
 
-    private UUID resolveBranchFilter(UUID requestedBranchId) {
+    private UUID resolveBranchFilter(UUID requestedBranchId, User currentUser) {
         if (SecurityContextHelper.isSuperAdmin()) {
             return requestedBranchId;
         }
 
-        UUID currentBranchId = currentUserBranchId();
+        UUID currentBranchId = currentUser.getBranchId();
         if (currentBranchId != null) {
             if (requestedBranchId != null && !requestedBranchId.equals(currentBranchId)) {
                 throw new ForbiddenException("Cannot access users from another branch");
@@ -320,6 +364,109 @@ public class UserServiceImpl implements UserService {
             throw new ForbiddenException("Cannot access users from another organization");
         }
         return requestedBranchId;
+    }
+
+    private UUID resolveBusinessCustomerFilter(UUID requestedBusinessCustomerId, UUID branchFilter, User currentUser) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return requestedBusinessCustomerId;
+        }
+
+        UUID currentBusinessCustomerId = currentUser.getBusinessCustomerId();
+        if (currentBusinessCustomerId != null) {
+            if (requestedBusinessCustomerId != null && !requestedBusinessCustomerId.equals(currentBusinessCustomerId)) {
+                throw new ForbiddenException("Cannot access users from another business customer");
+            }
+            return currentBusinessCustomerId;
+        }
+
+        if (requestedBusinessCustomerId == null) {
+            return null;
+        }
+
+        BusinessCustomer customer = businessCustomerRepository.findById(requestedBusinessCustomerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+        assertBusinessCustomerAccessible(customer, currentUser);
+        if (branchFilter != null && !branchFilter.equals(customer.getBranchId())) {
+            throw new ForbiddenException("Business customer belongs to another branch");
+        }
+        return requestedBusinessCustomerId;
+    }
+
+    private UUID resolveLocationFilter(UUID requestedLocationId,
+                                       UUID businessCustomerFilter,
+                                       UUID branchFilter,
+                                       User currentUser) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return requestedLocationId;
+        }
+
+        UUID currentLocationId = currentUser.getBusinessCustomerLocationId();
+        if (currentLocationId != null) {
+            if (requestedLocationId != null && !requestedLocationId.equals(currentLocationId)) {
+                throw new ForbiddenException("Cannot access users from another business customer location");
+            }
+            return currentLocationId;
+        }
+
+        if (requestedLocationId == null) {
+            return null;
+        }
+
+        BusinessCustomerLocation location = businessCustomerLocationRepository.findById(requestedLocationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Business customer location not found"));
+        if (!currentUser.getOrganizationId().equals(location.getOrganizationId())) {
+            throw new ForbiddenException("Cannot access users from another organization");
+        }
+        if (branchFilter != null && !branchFilter.equals(location.getBranchId())) {
+            throw new ForbiddenException("Business customer location belongs to another branch");
+        }
+        if (businessCustomerFilter != null && !businessCustomerFilter.equals(location.getBusinessCustomerId())) {
+            throw new ForbiddenException("Business customer location belongs to another customer");
+        }
+        return requestedLocationId;
+    }
+
+    private void assertBusinessCustomerAccessible(BusinessCustomer customer, User currentUser) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return;
+        }
+        if (!Objects.equals(currentUser.getOrganizationId(), customer.getOrganizationId())) {
+            throw new ForbiddenException("Cannot access business customer from another organization");
+        }
+        if (currentUser.getBranchId() != null && !Objects.equals(currentUser.getBranchId(), customer.getBranchId())) {
+            throw new ForbiddenException("Cannot access business customer from another branch");
+        }
+        if (currentUser.getBusinessCustomerId() != null
+                && !Objects.equals(currentUser.getBusinessCustomerId(), customer.getId())) {
+            throw new ForbiddenException("Cannot access another business customer");
+        }
+    }
+
+    private User currentUser() {
+        return userRepository.findById(SecurityContextHelper.getCurrentUserId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    }
+
+    private List<String> normalizeRoles(List<String> roles) {
+        if (roles == null || roles.isEmpty()) {
+            return List.of();
+        }
+        return roles.stream()
+                .filter(Objects::nonNull)
+                .flatMap(role -> Arrays.stream(role.split(",")))
+                .map(String::trim)
+                .filter(role -> !role.isBlank())
+                .map(role -> role.toUpperCase(Locale.ROOT))
+                .map(role -> role.startsWith("ROLE_") ? role.substring(5) : role)
+                .distinct()
+                .toList();
+    }
+
+    private String fullName(User user) {
+        String name = ((user.getFirstName() == null ? "" : user.getFirstName())
+                + " "
+                + (user.getLastName() == null ? "" : user.getLastName())).trim();
+        return name.isBlank() ? user.getEmail() : name;
     }
 
     private UUID currentUserBranchId() {

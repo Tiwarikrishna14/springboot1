@@ -1,18 +1,29 @@
 package com.company.orderapproval.user.service;
 
 import com.company.orderapproval.user.dto.AssignRolesRequest;
+import com.company.orderapproval.user.dto.ApproverUserResponse;
 import com.company.orderapproval.user.dto.CreateUserRequest;
 import com.company.orderapproval.user.dto.UpdateUserRequest;
 import com.company.orderapproval.user.dto.UpdateUserStatusRequest;
 import com.company.orderapproval.user.dto.UserResponse;
+import com.company.orderapproval.user.entity.UserStatus;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
 import java.util.UUID;
 
 public interface UserService {
-    Page<UserResponse> list(String search, UUID branchId, Pageable pageable);
+    Page<UserResponse> list(String search,
+                            UUID branchId,
+                            UUID businessCustomerId,
+                            UUID businessCustomerLocationId,
+                            UserStatus status,
+                            List<String> roles,
+                            Pageable pageable);
+
+    List<ApproverUserResponse> approvers(UUID businessCustomerId);
 
     UserResponse get(UUID id);
 

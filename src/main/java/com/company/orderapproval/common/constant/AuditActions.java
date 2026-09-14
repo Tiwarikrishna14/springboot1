@@ -16,6 +16,15 @@ public final class AuditActions {
     public static final String ROLE_REMOVED = "ROLE_REMOVED";
     public static final String ORGANIZATION_CREATED = "ORGANIZATION_CREATED";
     public static final String ORGANIZATION_UPDATED = "ORGANIZATION_UPDATED";
+    public static final String ORDER_CREATED = "ORDER_CREATED";
+    public static final String ORDER_UPDATED = "ORDER_UPDATED";
+    public static final String ORDER_CHANGES_REQUESTED = "ORDER_CHANGES_REQUESTED";
+    public static final String ORDER_APPROVED = "ORDER_APPROVED";
+    public static final String ORDER_REJECTED = "ORDER_REJECTED";
+    public static final String ORDER_SUBMITTED = "ORDER_SUBMITTED";
+    public static final String ORDER_PENDING = "ORDER_PENDING";
+    public static final String ORDER_CONFIRMED = "ORDER_CONFIRMED";
+    public static final String ORDER_DELIVERED = "ORDER_DELIVERED";
 
     private AuditActions() {
     }

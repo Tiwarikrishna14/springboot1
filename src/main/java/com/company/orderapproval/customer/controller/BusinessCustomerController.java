@@ -46,4 +46,10 @@ public class BusinessCustomerController {
     public ResponseEntity<ApiResponse<BusinessCustomerResponse>> update(@PathVariable UUID id, @Valid @RequestBody UpdateBusinessCustomerRequest r, HttpServletRequest h) {
         return ResponseEntity.ok(ApiResponse.success("Business customer updated successfully", service.update(id, r, h)));
     }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('CUSTOMER_UPDATE')")
+    public ResponseEntity<ApiResponse<BusinessCustomerResponse>> delete(@PathVariable UUID id, HttpServletRequest h) {
+        return ResponseEntity.ok(ApiResponse.success("Business customer deleted successfully", service.delete(id, h)));
+    }
 }

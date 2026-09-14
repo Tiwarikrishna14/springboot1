@@ -3,10 +3,12 @@ package com.company.orderapproval.user.controller;
 import com.company.orderapproval.common.response.ApiResponse;
 import com.company.orderapproval.common.response.PageResponse;
 import com.company.orderapproval.user.dto.AssignRolesRequest;
+import com.company.orderapproval.user.dto.ApproverUserResponse;
 import com.company.orderapproval.user.dto.CreateUserRequest;
 import com.company.orderapproval.user.dto.UpdateUserRequest;
 import com.company.orderapproval.user.dto.UpdateUserStatusRequest;
 import com.company.orderapproval.user.dto.UserResponse;
+import com.company.orderapproval.user.entity.UserStatus;
 import com.company.orderapproval.user.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -46,10 +49,32 @@ public class UserController {
     public ResponseEntity<ApiResponse<PageResponse<UserResponse>>> list(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) UUID branchId,
+            @RequestParam(required = false) UUID businessCustomerId,
+            @RequestParam(required = false) UUID businessCustomerLocationId,
+            @RequestParam(required = false) UserStatus status,
+            @RequestParam(required = false) List<String> roles,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
                 "Users fetched successfully",
-                PageResponse.from(userService.list(search, branchId, pageable))
+                PageResponse.from(userService.list(
+                        search,
+                        branchId,
+                        businessCustomerId,
+                        businessCustomerLocationId,
+                        status,
+                        roles,
+                        pageable
+                ))
+        ));
+    }
+
+    @Operation(summary = "List approver users for business customer")
+    @GetMapping("/approvers")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'CUSTOMER_ADMIN') or hasAnyAuthority('USER_VIEW', 'ORDER_CREATE', 'ORDER_UPDATE')")
+    public ResponseEntity<ApiResponse<List<ApproverUserResponse>>> approvers(@RequestParam UUID businessCustomerId) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Approver users fetched successfully",
+                userService.approvers(businessCustomerId)
         ));
     }
 

@@ -1,0 +1,791 @@
+package com.company.orderapproval.order.service;
+
+import com.company.orderapproval.audit.service.AuditService;
+import com.company.orderapproval.common.constant.AuditActions;
+import com.company.orderapproval.common.exception.BadRequestException;
+import com.company.orderapproval.common.exception.ForbiddenException;
+import com.company.orderapproval.common.exception.ResourceNotFoundException;
+import com.company.orderapproval.common.exception.ValidationException;
+import com.company.orderapproval.common.util.SecurityContextHelper;
+import com.company.orderapproval.customer.entity.BusinessCustomer;
+import com.company.orderapproval.customer.location.repository.BusinessCustomerLocationRepository;
+import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
+import com.company.orderapproval.order.dto.ApprovalAction;
+import com.company.orderapproval.order.dto.ApprovalActionRequest;
+import com.company.orderapproval.order.dto.CreateOrderRequest;
+import com.company.orderapproval.order.dto.OrderApproverResponse;
+import com.company.orderapproval.order.dto.OrderItemRequest;
+import com.company.orderapproval.order.dto.OrderItemResponse;
+import com.company.orderapproval.order.dto.OrderResponse;
+import com.company.orderapproval.order.dto.SupplierAction;
+import com.company.orderapproval.order.dto.SupplierActionRequest;
+import com.company.orderapproval.order.dto.UpdateOrderRequest;
+import com.company.orderapproval.order.entity.ApprovalStatus;
+import com.company.orderapproval.order.entity.Order;
+import com.company.orderapproval.order.entity.OrderApprover;
+import com.company.orderapproval.order.entity.OrderItem;
+import com.company.orderapproval.order.entity.OrderNumberCounter;
+import com.company.orderapproval.order.entity.OrderStatus;
+import com.company.orderapproval.order.event.OrderEvent;
+import com.company.orderapproval.order.repository.OrderNumberCounterRepository;
+import com.company.orderapproval.order.repository.OrderRepository;
+import com.company.orderapproval.organization.entity.Organization;
+import com.company.orderapproval.organization.entity.OrganizationType;
+import com.company.orderapproval.organization.repository.OrganizationRepository;
+import com.company.orderapproval.product.entity.Product;
+import com.company.orderapproval.product.service.ProductRepository;
+import com.company.orderapproval.user.entity.User;
+import com.company.orderapproval.user.entity.UserStatus;
+import com.company.orderapproval.user.repository.UserRepository;
+import com.company.orderapproval.user.repository.UserRoleRepository;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private static final String ORDER_APPROVE = "ORDER_APPROVE";
+    private static final String ORDER_REJECT = "ORDER_REJECT";
+    private static final String ORDER_UPDATE = "ORDER_UPDATE";
+    private static final String ORGANIZATION_ADMIN = "ORGANIZATION_ADMIN";
+    private static final String BRANCH_ADMIN = "BRANCH_ADMIN";
+    private static final Set<OrderStatus> EDITABLE_STATUSES = Set.of(
+            OrderStatus.DRAFT,
+            OrderStatus.CREATED,
+            OrderStatus.CHANGES_REQUESTED
+    );
+    private static final Set<OrderStatus> SUPPLIER_VISIBLE_STATUSES = Set.of(
+            OrderStatus.SUBMITTED,
+            OrderStatus.REJECTED,
+            OrderStatus.PENDING,
+            OrderStatus.CONFIRMED,
+            OrderStatus.DELIVERED
+    );
+
+    private final OrderRepository orderRepository;
+    private final OrderNumberCounterRepository orderNumberCounterRepository;
+    private final UserRepository userRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final BusinessCustomerRepository businessCustomerRepository;
+    private final BusinessCustomerLocationRepository businessCustomerLocationRepository;
+    private final ProductRepository productRepository;
+    private final OrganizationRepository organizationRepository;
+    private final AuditService auditService;
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Transactional
+    public OrderResponse create(CreateOrderRequest request, HttpServletRequest servletRequest) {
+        User creator = currentUser();
+        BusinessCustomer customer = creatorBusinessCustomer(creator);
+
+        Order order = new Order();
+        order.setOrderNumber(nextOrderNumber(customer));
+        order.setOrganizationId(customer.getOrganizationId());
+        order.setBranchId(customer.getBranchId());
+        order.setBusinessCustomerId(customer.getId());
+        order.setBusinessCustomerLocationId(creator.getBusinessCustomerLocationId());
+        order.setBusinessCustomerCode(customer.getCustomerCode());
+        order.setBusinessCustomerName(customer.getName());
+        order.setCreatedBy(creator.getId());
+        applyFields(order, request.notes(), request.remarks(), request.priority(), request.location(), request.referenceNumber());
+        if (order.getLocation() == null) {
+            order.setLocation(defaultLocationName(creator.getBusinessCustomerLocationId()));
+        }
+
+        syncItems(order, request.products(), customer);
+        syncApprovers(order, request.approverIds(), customer.getId());
+        order.setStatus(orderIsComplete(order) ? OrderStatus.CREATED : OrderStatus.DRAFT);
+
+        Order saved = orderRepository.save(order);
+        audit(saved, AuditActions.ORDER_CREATED, "Order created", servletRequest);
+        publish(AuditActions.ORDER_CREATED, saved, creator.getId());
+        return toResponse(saved);
+    }
+
+    @Transactional
+    public OrderResponse update(UUID orderId, UpdateOrderRequest request, HttpServletRequest servletRequest) {
+        Order order = findDetailedForUpdate(orderId);
+        User actor = currentUser();
+        assertEditable(order);
+        assertCustomerSideMutationAllowed(order, actor);
+
+        BusinessCustomer customer = businessCustomer(order.getBusinessCustomerId());
+        boolean hadProducts = !order.getItems().isEmpty();
+        boolean productsExplicitlyRemoved = request.products() != null && request.products().isEmpty() && hadProducts;
+
+        applyFields(order, request.notes(), request.remarks(), request.priority(), request.location(), request.referenceNumber());
+        syncItems(order, request.products(), customer);
+        syncApprovers(order, request.approverIds(), customer.getId());
+
+        if (productsExplicitlyRemoved) {
+            order.setStatus(OrderStatus.ABANDONED);
+        } else {
+            order.setStatus(orderIsComplete(order) ? OrderStatus.CREATED : OrderStatus.DRAFT);
+            resetApprovalActivity(order);
+        }
+
+        Order saved = orderRepository.save(order);
+        audit(saved, AuditActions.ORDER_UPDATED, "Order updated", servletRequest);
+        return toResponse(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public OrderResponse get(UUID orderId) {
+        Order order = orderRepository.findDetailedById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        assertVisible(order, currentUser());
+        return toResponse(order);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> list(
+            OrderStatus status,
+            UUID createdBy,
+            UUID businessCustomerId,
+            String orderNumber,
+            Pageable pageable
+    ) {
+        User user = currentUser();
+        Specification<Order> specification = visibleTo(user)
+                .and(matchesStatus(status))
+                .and(matchesCreatedBy(createdBy))
+                .and(matchesBusinessCustomer(businessCustomerId))
+                .and(matchesOrderNumber(orderNumber));
+        return orderRepository.findAll(specification, pageable).map(this::toResponse);
+    }
+
+    @Transactional
+    public OrderResponse actOnApproval(UUID orderId, ApprovalActionRequest request, HttpServletRequest servletRequest) {
+        Order order = findDetailedForUpdate(orderId);
+        User actor = currentUser();
+        assertVisible(order, actor);
+        if (order.getStatus() != OrderStatus.CREATED) {
+            throw new BadRequestException("Order is not in an approval state");
+        }
+
+        OrderApprover approver = order.getApprovers().stream()
+                .filter(candidate -> candidate.getUserId().equals(actor.getId()))
+                .findFirst()
+                .orElseThrow(() -> new ForbiddenException("You are not assigned as an approver for this order"));
+        assertEligibleApprover(actor.getId(), order.getBusinessCustomerId(), approvalPermission(request.action()));
+
+        ApprovalStatus approvalStatus = switch (request.action()) {
+            case APPROVE -> ApprovalStatus.APPROVED;
+            case REQUEST_CHANGES -> ApprovalStatus.CHANGES_REQUESTED;
+            case REJECT -> ApprovalStatus.REJECTED;
+        };
+        approver.setApprovalStatus(approvalStatus);
+        approver.setRemark(cleanOptional(request.remark()));
+        approver.setActedAt(Instant.now());
+
+        String auditAction = AuditActions.ORDER_UPDATED;
+        if (request.action() == ApprovalAction.REQUEST_CHANGES) {
+            order.setStatus(OrderStatus.CHANGES_REQUESTED);
+            auditAction = AuditActions.ORDER_CHANGES_REQUESTED;
+        } else if (request.action() == ApprovalAction.REJECT) {
+            order.setStatus(OrderStatus.REJECTED);
+            auditAction = AuditActions.ORDER_REJECTED;
+        } else if (allApproversApproved(order)) {
+            order.setStatus(OrderStatus.APPROVED);
+            auditAction = AuditActions.ORDER_APPROVED;
+        }
+
+        Order saved = orderRepository.save(order);
+        audit(saved, auditAction, "Order approval action recorded", servletRequest);
+        if (auditAction.equals(AuditActions.ORDER_CHANGES_REQUESTED) || auditAction.equals(AuditActions.ORDER_APPROVED)) {
+            publish(auditAction, saved, actor.getId());
+        }
+        return toResponse(saved);
+    }
+
+    @Transactional
+    public OrderResponse submit(UUID orderId, HttpServletRequest servletRequest) {
+        Order order = findDetailedForUpdate(orderId);
+        User actor = currentUser();
+        assertVisible(order, actor);
+        if (order.getStatus() != OrderStatus.APPROVED) {
+            throw new BadRequestException("Only approved orders can be submitted");
+        }
+        if (!actor.getId().equals(order.getCreatedBy()) && !isAssignedEligibleApprover(order, actor.getId())) {
+            throw new ForbiddenException("Only the creator or an assigned authorized approver can submit this order");
+        }
+
+        order.setStatus(OrderStatus.SUBMITTED);
+        Order saved = orderRepository.save(order);
+        audit(saved, AuditActions.ORDER_SUBMITTED, "Order submitted", servletRequest);
+        publish(AuditActions.ORDER_SUBMITTED, saved, actor.getId());
+        return toResponse(saved);
+    }
+
+    @Transactional
+    public OrderResponse supplierAction(UUID orderId, SupplierActionRequest request, HttpServletRequest servletRequest) {
+        Order order = findDetailedForUpdate(orderId);
+        User actor = currentUser();
+        assertSupplierActionAllowed(actor, request.action());
+        assertVisible(order, actor);
+
+        String auditAction;
+        switch (request.action()) {
+            case REJECT -> {
+                requireStatus(order, OrderStatus.SUBMITTED, "Only submitted orders can be rejected by supplier");
+                order.setStatus(OrderStatus.REJECTED);
+                auditAction = AuditActions.ORDER_REJECTED;
+            }
+            case PENDING -> {
+                requireStatus(order, OrderStatus.SUBMITTED, "Only submitted orders can be marked pending");
+                order.setExpectedDeliveryDate(validExpectedDeliveryDate(request.expectedDeliveryDate()));
+                order.setStatus(OrderStatus.PENDING);
+                auditAction = AuditActions.ORDER_PENDING;
+            }
+            case CONFIRM -> {
+                if (order.getStatus() != OrderStatus.SUBMITTED && order.getStatus() != OrderStatus.PENDING) {
+                    throw new BadRequestException("Only submitted or pending orders can be confirmed");
+                }
+                order.setExpectedDeliveryDate(validExpectedDeliveryDate(request.expectedDeliveryDate()));
+                order.setStatus(OrderStatus.CONFIRMED);
+                auditAction = AuditActions.ORDER_CONFIRMED;
+            }
+            case DELIVER -> {
+                requireStatus(order, OrderStatus.CONFIRMED, "Only confirmed orders can be delivered");
+                order.setStatus(OrderStatus.DELIVERED);
+                auditAction = AuditActions.ORDER_DELIVERED;
+            }
+            default -> throw new BadRequestException("Unsupported supplier action");
+        }
+
+        String remark = cleanOptional(request.remark());
+        if (remark != null) {
+            order.setRemarks(remark);
+        }
+
+        Order saved = orderRepository.save(order);
+        audit(saved, auditAction, "Supplier order action recorded", servletRequest);
+        if (auditAction.equals(AuditActions.ORDER_CONFIRMED) || auditAction.equals(AuditActions.ORDER_DELIVERED)) {
+            publish(auditAction, saved, actor.getId());
+        }
+        return toResponse(saved);
+    }
+
+    private String nextOrderNumber(BusinessCustomer customer) {
+        String companyCode = companyCode(customer);
+        orderNumberCounterRepository.insertIfMissing(customer.getId(), companyCode);
+        OrderNumberCounter counter = orderNumberCounterRepository.findByBusinessCustomerIdForUpdate(customer.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Order number counter not found"));
+        long sequence = counter.getNextSequence();
+        counter.setNextSequence(sequence + 1);
+        return counter.getCompanyCode() + "-SO-" + String.format(Locale.ROOT, "%03d", sequence);
+    }
+
+    private void syncItems(Order order, List<OrderItemRequest> requestedItems, BusinessCustomer customer) {
+        if (requestedItems == null) {
+            return;
+        }
+        if (requestedItems.isEmpty()) {
+            order.getItems().clear();
+            return;
+        }
+
+        List<Long> requestedProductIds = distinctProductIds(requestedItems);
+        Map<Long, Product> productsById = new HashMap<>();
+        productRepository.findAllById(requestedProductIds).forEach(product -> productsById.put(product.getId(), product));
+
+        List<Long> missingProductIds = requestedProductIds.stream()
+                .filter(productId -> !productsById.containsKey(productId))
+                .toList();
+        if (!missingProductIds.isEmpty()) {
+            throw new ValidationException("Invalid products", Map.of("productIds", missingProductIds.toString()));
+        }
+
+        List<Long> invalidCustomerProducts = productsById.values().stream()
+                .filter(product -> !customer.getCustomerCode().equalsIgnoreCase(product.getCustomerSellCode()))
+                .map(Product::getId)
+                .toList();
+        if (!invalidCustomerProducts.isEmpty()) {
+            throw new ValidationException("Invalid products", Map.of("productIds", invalidCustomerProducts + " do not belong to customer " + customer.getCustomerCode()));
+        }
+
+        List<Long> inactiveProductIds = productsById.values().stream()
+                .filter(product -> !"ACTIVE".equalsIgnoreCase(product.getStatus()))
+                .map(Product::getId)
+                .toList();
+        if (!inactiveProductIds.isEmpty()) {
+            throw new ValidationException("Invalid products", Map.of("productIds", inactiveProductIds + " are inactive"));
+        }
+
+        Map<Long, OrderItem> existingItems = order.getItems().stream()
+                .collect(Collectors.toMap(OrderItem::getProductId, Function.identity()));
+        Set<Long> requestedProductIdSet = new HashSet<>(requestedProductIds);
+        order.getItems().removeIf(item -> !requestedProductIdSet.contains(item.getProductId()));
+
+        for (OrderItemRequest itemRequest : requestedItems) {
+            Product product = productsById.get(itemRequest.productId());
+            OrderItem item = existingItems.get(itemRequest.productId());
+            if (item == null) {
+                item = new OrderItem();
+                item.setOrder(order);
+                item.setProductId(product.getId());
+                order.getItems().add(item);
+            }
+            applyItemValues(item, itemRequest, product);
+        }
+    }
+
+    private void applyItemValues(OrderItem item, OrderItemRequest request, Product product) {
+        if (request.quantity() == null || request.quantity().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Quantity must be greater than 0");
+        }
+        if (request.unitPrice() == null || request.unitPrice().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Unit price must be greater than or equal to 0");
+        }
+
+        item.setProductCode(product.getNavItemCode());
+        item.setProductDescription(product.getItemDescription());
+        item.setQuantity(request.quantity());
+        item.setUnitPrice(request.unitPrice());
+        item.setLineRemark(cleanOptional(request.remark()));
+        item.setLineTotal(request.quantity().multiply(request.unitPrice()).setScale(2, RoundingMode.HALF_UP));
+    }
+
+    private List<Long> distinctProductIds(List<OrderItemRequest> requestedItems) {
+        Set<Long> seen = new LinkedHashSet<>();
+        for (OrderItemRequest item : requestedItems) {
+            if (item.productId() == null) {
+                throw new BadRequestException("Product id is required");
+            }
+            if (!seen.add(item.productId())) {
+                throw new BadRequestException("Duplicate product id in order: " + item.productId());
+            }
+        }
+        return new ArrayList<>(seen);
+    }
+
+    private void syncApprovers(Order order, List<UUID> requestedApproverIds, UUID businessCustomerId) {
+        if (requestedApproverIds == null) {
+            return;
+        }
+        if (requestedApproverIds.isEmpty()) {
+            order.getApprovers().clear();
+            return;
+        }
+
+        List<UUID> normalizedApproverIds = distinctApproverIds(requestedApproverIds);
+        Set<UUID> eligibleApproverIds = new HashSet<>(eligibleApproverIds(
+                normalizedApproverIds,
+                businessCustomerId,
+                List.of(ORDER_APPROVE)
+        ));
+        List<UUID> invalidApproverIds = normalizedApproverIds.stream()
+                .filter(approverId -> !eligibleApproverIds.contains(approverId))
+                .toList();
+        if (!invalidApproverIds.isEmpty()) {
+            throw new ValidationException("Invalid approvers", Map.of("approverIds", invalidApproverIds.toString()));
+        }
+
+        Map<UUID, OrderApprover> existingApprovers = order.getApprovers().stream()
+                .collect(Collectors.toMap(OrderApprover::getUserId, Function.identity()));
+        Set<UUID> requestedApproverIdSet = new HashSet<>(normalizedApproverIds);
+        order.getApprovers().removeIf(approver -> !requestedApproverIdSet.contains(approver.getUserId()));
+
+        for (UUID approverId : normalizedApproverIds) {
+            if (!existingApprovers.containsKey(approverId)) {
+                OrderApprover approver = new OrderApprover();
+                approver.setOrder(order);
+                approver.setUserId(approverId);
+                approver.setApprovalStatus(ApprovalStatus.PENDING);
+                order.getApprovers().add(approver);
+            }
+        }
+    }
+
+    private List<UUID> distinctApproverIds(List<UUID> approverIds) {
+        Set<UUID> seen = new LinkedHashSet<>();
+        for (UUID approverId : approverIds) {
+            if (approverId == null) {
+                throw new BadRequestException("Approver id cannot be null");
+            }
+            if (!seen.add(approverId)) {
+                throw new BadRequestException("Duplicate approver id in order: " + approverId);
+            }
+        }
+        return new ArrayList<>(seen);
+    }
+
+    private List<UUID> eligibleApproverIds(Collection<UUID> approverIds, UUID businessCustomerId, Collection<String> permissionCodes) {
+        if (approverIds.isEmpty()) {
+            return List.of();
+        }
+        return userRepository.findEligibleApproverIds(
+                approverIds,
+                businessCustomerId,
+                UserStatus.ACTIVE,
+                permissionCodes
+        );
+    }
+
+    private List<String> approvalPermission(ApprovalAction action) {
+        if (action == ApprovalAction.REJECT) {
+            return List.of(ORDER_REJECT);
+        }
+        return List.of(ORDER_APPROVE);
+    }
+
+    private void assertEligibleApprover(UUID userId, UUID businessCustomerId, Collection<String> permissionCodes) {
+        if (eligibleApproverIds(List.of(userId), businessCustomerId, permissionCodes).isEmpty()) {
+            throw new ForbiddenException("Approver is no longer eligible for this order");
+        }
+    }
+
+    private boolean isAssignedEligibleApprover(Order order, UUID userId) {
+        boolean assigned = order.getApprovers().stream().anyMatch(approver -> approver.getUserId().equals(userId));
+        return assigned && !eligibleApproverIds(List.of(userId), order.getBusinessCustomerId(), List.of(ORDER_APPROVE)).isEmpty();
+    }
+
+    private void resetApprovalActivity(Order order) {
+        boolean hasApprovalActivity = order.getApprovers().stream()
+                .anyMatch(approver -> approver.getApprovalStatus() != ApprovalStatus.PENDING);
+        if (!hasApprovalActivity) {
+            return;
+        }
+        for (OrderApprover approver : order.getApprovers()) {
+            approver.setApprovalStatus(ApprovalStatus.PENDING);
+            approver.setRemark(null);
+            approver.setActedAt(null);
+        }
+    }
+
+    private boolean allApproversApproved(Order order) {
+        return !order.getApprovers().isEmpty()
+                && order.getApprovers().stream()
+                .allMatch(approver -> approver.getApprovalStatus() == ApprovalStatus.APPROVED);
+    }
+
+    private boolean orderIsComplete(Order order) {
+        return !order.getItems().isEmpty() && !order.getApprovers().isEmpty();
+    }
+
+    private void assertEditable(Order order) {
+        if (!EDITABLE_STATUSES.contains(order.getStatus())) {
+            throw new BadRequestException("Order is no longer editable");
+        }
+    }
+
+    private void requireStatus(Order order, OrderStatus status, String message) {
+        if (order.getStatus() != status) {
+            throw new BadRequestException(message);
+        }
+    }
+
+    private LocalDate validExpectedDeliveryDate(LocalDate expectedDeliveryDate) {
+        if (expectedDeliveryDate == null) {
+            throw new BadRequestException("expectedDeliveryDate is required");
+        }
+        if (expectedDeliveryDate.isBefore(LocalDate.now())) {
+            throw new BadRequestException("expectedDeliveryDate cannot be in the past");
+        }
+        return expectedDeliveryDate;
+    }
+
+    private void applyFields(Order order, String notes, String remarks, String priority, String location, String referenceNumber) {
+        order.setNotes(cleanOptional(notes));
+        order.setRemarks(cleanOptional(remarks));
+        order.setPriority(cleanOptional(priority));
+        order.setLocation(cleanOptional(location));
+        order.setReferenceNumber(cleanOptional(referenceNumber));
+    }
+
+    private Order findDetailedForUpdate(UUID orderId) {
+        if (orderId == null) {
+            throw new BadRequestException("Order id is required");
+        }
+        return orderRepository.findDetailedByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+    }
+
+    private User currentUser() {
+        UUID currentUserId = SecurityContextHelper.getCurrentUserId();
+        return userRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    }
+
+    private BusinessCustomer creatorBusinessCustomer(User creator) {
+        if (creator.getBusinessCustomerId() == null) {
+            throw new ForbiddenException("Only users assigned to a business customer can create orders");
+        }
+        BusinessCustomer customer = businessCustomer(creator.getBusinessCustomerId());
+        if (!customer.getOrganizationId().equals(creator.getOrganizationId())) {
+            throw new ForbiddenException("User and business customer belong to different organizations");
+        }
+        if (creator.getBranchId() != null && !customer.getBranchId().equals(creator.getBranchId())) {
+            throw new ForbiddenException("User and business customer belong to different branches");
+        }
+        return customer;
+    }
+
+    private BusinessCustomer businessCustomer(UUID businessCustomerId) {
+        return businessCustomerRepository.findById(businessCustomerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+    }
+
+    private String defaultLocationName(UUID businessCustomerLocationId) {
+        if (businessCustomerLocationId == null) {
+            return null;
+        }
+        return businessCustomerLocationRepository.findById(businessCustomerLocationId)
+                .map(location -> location.getLocationName())
+                .orElse(null);
+    }
+
+    private void assertCustomerSideMutationAllowed(Order order, User actor) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return;
+        }
+        if (actor.getBusinessCustomerId() != null && actor.getBusinessCustomerId().equals(order.getBusinessCustomerId())) {
+            return;
+        }
+        if (actor.getId().equals(order.getCreatedBy())) {
+            return;
+        }
+        throw new ForbiddenException("Cannot modify order from another business customer");
+    }
+
+    private void assertSupplierActionAllowed(User actor, SupplierAction action) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return;
+        }
+        Organization organization = organization(actor.getOrganizationId());
+        if (!isSupplierSideOrganization(organization.getOrganizationType())) {
+            throw new ForbiddenException("Supplier actions are not allowed for customer users");
+        }
+        if (!SecurityContextHelper.hasRole(ORGANIZATION_ADMIN) && !SecurityContextHelper.hasRole(BRANCH_ADMIN)) {
+            throw new ForbiddenException("Only organization admin or branch admin can perform supplier actions");
+        }
+        Set<String> permissions = new HashSet<>(userRoleRepository.findPermissionCodesByUserId(actor.getId()));
+        String requiredPermission = action == SupplierAction.REJECT ? ORDER_REJECT : ORDER_UPDATE;
+        if (!permissions.contains(requiredPermission)) {
+            throw new ForbiddenException("Supplier order permission is required");
+        }
+    }
+
+    private void assertVisible(Order order, User user) {
+        if (!canView(order, user)) {
+            throw new ForbiddenException("Cannot access this order");
+        }
+    }
+
+    private boolean canView(Order order, User user) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return true;
+        }
+        if (user.getBusinessCustomerId() != null && user.getBusinessCustomerId().equals(order.getBusinessCustomerId())) {
+            return true;
+        }
+
+        Organization organization = organization(user.getOrganizationId());
+        if (isSupplierSideOrganization(organization.getOrganizationType())) {
+            return SUPPLIER_VISIBLE_STATUSES.contains(order.getStatus());
+        }
+        if (organization.getOrganizationType() == OrganizationType.CUSTOMER
+                && Objects.equals(user.getOrganizationId(), order.getOrganizationId())) {
+            return user.getBranchId() == null || Objects.equals(user.getBranchId(), order.getBranchId());
+        }
+        return false;
+    }
+
+    private Specification<Order> visibleTo(User user) {
+        if (SecurityContextHelper.isSuperAdmin()) {
+            return alwaysTrue();
+        }
+
+        Organization organization = organization(user.getOrganizationId());
+        if (user.getBusinessCustomerId() != null) {
+            UUID businessCustomerId = user.getBusinessCustomerId();
+            return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("businessCustomerId"), businessCustomerId);
+        }
+        if (isSupplierSideOrganization(organization.getOrganizationType())) {
+            return (root, query, criteriaBuilder) -> root.get("status").in(SUPPLIER_VISIBLE_STATUSES);
+        }
+        UUID organizationId = user.getOrganizationId();
+        UUID branchId = user.getBranchId();
+        return (root, query, criteriaBuilder) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(criteriaBuilder.equal(root.get("organizationId"), organizationId));
+            if (branchId != null) {
+                predicates.add(criteriaBuilder.equal(root.get("branchId"), branchId));
+            }
+            return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
+        };
+    }
+
+    private Specification<Order> matchesStatus(OrderStatus status) {
+        if (status == null) {
+            return alwaysTrue();
+        }
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), status);
+    }
+
+    private Specification<Order> matchesCreatedBy(UUID createdBy) {
+        if (createdBy == null) {
+            return alwaysTrue();
+        }
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("createdBy"), createdBy);
+    }
+
+    private Specification<Order> matchesBusinessCustomer(UUID businessCustomerId) {
+        if (businessCustomerId == null) {
+            return alwaysTrue();
+        }
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("businessCustomerId"), businessCustomerId);
+    }
+
+    private Specification<Order> matchesOrderNumber(String orderNumber) {
+        String value = cleanOptional(orderNumber);
+        if (value == null) {
+            return alwaysTrue();
+        }
+        String pattern = "%" + value.toLowerCase(Locale.ROOT) + "%";
+        return (root, query, criteriaBuilder) -> criteriaBuilder.like(
+                criteriaBuilder.lower(root.get("orderNumber")),
+                pattern
+        );
+    }
+
+    private Specification<Order> alwaysTrue() {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.conjunction();
+    }
+
+    private Organization organization(UUID organizationId) {
+        return organizationRepository.findById(organizationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Organization not found"));
+    }
+
+    private boolean isSupplierSideOrganization(OrganizationType organizationType) {
+        return organizationType == OrganizationType.SUPPLIER
+                || organizationType == OrganizationType.SYSTEM
+                || organizationType == OrganizationType.PARENT;
+    }
+
+    private String companyCode(BusinessCustomer customer) {
+        String source = customer.getCustomerCode();
+        if (source == null || source.isBlank()) {
+            source = customer.getId().toString();
+        }
+        String normalized = source.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
+        if (normalized.isBlank()) {
+            normalized = customer.getId().toString().replace("-", "").toUpperCase(Locale.ROOT);
+        }
+        return (normalized + "XXX").substring(0, 3);
+    }
+
+    private OrderResponse toResponse(Order order) {
+        List<OrderItemResponse> itemResponses = order.getItems().stream()
+                .map(item -> new OrderItemResponse(
+                        item.getId(),
+                        item.getProductId(),
+                        item.getProductCode(),
+                        item.getProductDescription(),
+                        item.getQuantity(),
+                        item.getUnitPrice(),
+                        item.getLineRemark(),
+                        item.getLineTotal()
+                ))
+                .toList();
+        List<OrderApproverResponse> approverResponses = order.getApprovers().stream()
+                .map(approver -> new OrderApproverResponse(
+                        approver.getId(),
+                        approver.getUserId(),
+                        approver.getApprovalStatus(),
+                        approver.getRemark(),
+                        approver.getActedAt()
+                ))
+                .toList();
+        BigDecimal totalAmount = itemResponses.stream()
+                .map(OrderItemResponse::lineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return new OrderResponse(
+                order.getId(),
+                order.getOrderNumber(),
+                order.getOrganizationId(),
+                order.getBranchId(),
+                order.getBusinessCustomerId(),
+                order.getBusinessCustomerLocationId(),
+                order.getBusinessCustomerCode(),
+                order.getBusinessCustomerName(),
+                order.getCreatedBy(),
+                order.getNotes(),
+                order.getRemarks(),
+                order.getPriority(),
+                order.getLocation(),
+                order.getReferenceNumber(),
+                order.getStatus(),
+                order.getExpectedDeliveryDate(),
+                totalAmount,
+                order.getVersion(),
+                order.getCreatedAt(),
+                order.getUpdatedAt(),
+                itemResponses,
+                approverResponses
+        );
+    }
+
+    private void audit(Order order, String action, String description, HttpServletRequest servletRequest) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("orderNumber", order.getOrderNumber());
+        values.put("status", order.getStatus().name());
+        auditService.record(
+                action,
+                order.getOrganizationId(),
+                SecurityContextHelper.getCurrentUserId(),
+                "Order",
+                order.getId(),
+                description,
+                null,
+                values,
+                servletRequest
+        );
+    }
+
+    private void publish(String action, Order order, UUID actorUserId) {
+        eventPublisher.publishEvent(new OrderEvent(
+                action,
+                order.getId(),
+                order.getOrderNumber(),
+                order.getBusinessCustomerId(),
+                actorUserId
+        ));
+    }
+
+    private String cleanOptional(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+}

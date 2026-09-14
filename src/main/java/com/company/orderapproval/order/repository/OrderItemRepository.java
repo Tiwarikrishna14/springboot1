@@ -1,0 +1,9 @@
+package com.company.orderapproval.order.repository;
+
+import com.company.orderapproval.order.entity.OrderItem;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
+}

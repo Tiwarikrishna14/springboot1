@@ -1,7 +1,10 @@
 package com.company.orderapproval.user.service;
 
+import com.company.orderapproval.audit.repository.AuditLogRepository;
 import com.company.orderapproval.audit.service.AuditService;
+import com.company.orderapproval.auth.repository.PasswordResetTokenRepository;
 import com.company.orderapproval.auth.repository.RefreshTokenRepository;
+import com.company.orderapproval.branch.entity.BranchStatus;
 import com.company.orderapproval.common.constant.AuditActions;
 import com.company.orderapproval.common.exception.BadRequestException;
 import com.company.orderapproval.common.exception.ConflictException;
@@ -12,11 +15,16 @@ import com.company.orderapproval.organization.repository.OrganizationRepository;
 import com.company.orderapproval.branch.entity.Branch;
 import com.company.orderapproval.branch.repository.BranchRepository;
 import com.company.orderapproval.customer.entity.BusinessCustomer;
+import com.company.orderapproval.customer.entity.BusinessCustomerStatus;
 import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
 import com.company.orderapproval.customer.location.entity.BusinessCustomerLocation;
 import com.company.orderapproval.customer.location.repository.BusinessCustomerLocationRepository;
+import com.company.orderapproval.order.repository.OrderApproverRepository;
+import com.company.orderapproval.order.repository.OrderRepository;
+import com.company.orderapproval.organization.entity.OrganizationStatus;
 import com.company.orderapproval.role.entity.Role;
 import com.company.orderapproval.role.repository.RoleRepository;
+import com.company.orderapproval.role.service.RoleDelegationService;
 import com.company.orderapproval.user.dto.AssignRolesRequest;
 import com.company.orderapproval.user.dto.ApproverUserResponse;
 import com.company.orderapproval.user.dto.CreateUserRequest;
@@ -59,6 +67,11 @@ public class UserServiceImpl implements UserService {
     private final BusinessCustomerRepository businessCustomerRepository;
     private final BusinessCustomerLocationRepository businessCustomerLocationRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final AuditLogRepository auditLogRepository;
+    private final OrderRepository orderRepository;
+    private final OrderApproverRepository orderApproverRepository;
+    private final RoleDelegationService roleDelegationService;
 
     public UserServiceImpl(UserRepository userRepository,
                            UserRoleRepository userRoleRepository,
@@ -69,7 +82,12 @@ public class UserServiceImpl implements UserService {
                            AuditService auditService, BranchRepository branchRepository,
                            BusinessCustomerRepository businessCustomerRepository,
                            BusinessCustomerLocationRepository businessCustomerLocationRepository,
-                           RefreshTokenRepository refreshTokenRepository) {
+                           RefreshTokenRepository refreshTokenRepository,
+                           PasswordResetTokenRepository passwordResetTokenRepository,
+                           AuditLogRepository auditLogRepository,
+                           OrderRepository orderRepository,
+                           OrderApproverRepository orderApproverRepository,
+                           RoleDelegationService roleDelegationService) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.roleRepository = roleRepository;
@@ -81,6 +99,11 @@ public class UserServiceImpl implements UserService {
         this.businessCustomerRepository = businessCustomerRepository;
         this.businessCustomerLocationRepository = businessCustomerLocationRepository;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.passwordResetTokenRepository = passwordResetTokenRepository;
+        this.auditLogRepository = auditLogRepository;
+        this.orderRepository = orderRepository;
+        this.orderApproverRepository = orderApproverRepository;
+        this.roleDelegationService = roleDelegationService;
     }
 
     @Override
@@ -91,6 +114,9 @@ public class UserServiceImpl implements UserService {
                                    UserStatus status,
                                    List<String> roles,
                                    Pageable pageable) {
+        if (status == UserStatus.INACTIVE) {
+            return Page.empty(pageable);
+        }
         User currentUser = currentUser();
         UUID organizationFilter = SecurityContextHelper.isSuperAdmin()
                 ? null
@@ -123,6 +149,9 @@ public class UserServiceImpl implements UserService {
         }
         BusinessCustomer customer = businessCustomerRepository.findById(businessCustomerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+        if (customer.getStatus() != BusinessCustomerStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Business customer not found");
+        }
         assertBusinessCustomerAccessible(customer, currentUser());
 
         return userRepository.findApproverUsersByBusinessCustomerId(
@@ -137,7 +166,11 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserResponse get(UUID id) {
-        return toResponse(findAccessibleUser(id));
+        User user = findAccessibleUser(id);
+        if (user.getStatus() == UserStatus.INACTIVE) {
+            throw new ResourceNotFoundException("User not found");
+        }
+        return toResponse(user);
     }
 
     @Override
@@ -238,22 +271,40 @@ public class UserServiceImpl implements UserService {
         }
 
         Map<String, Object> oldValues = Map.of("status", user.getStatus().name());
-        user.setStatus(UserStatus.INACTIVE);
-        user.setAccountLockedUntil(null);
-        user.setUpdatedBy(currentUserId);
-        userRepository.save(user);
-        refreshTokenRepository.revokeActiveTokensByUserId(user.getId(), Instant.now());
+        if (hasOrderMapping(user.getId())) {
+            user.setStatus(UserStatus.INACTIVE);
+            user.setAccountLockedUntil(null);
+            user.setUpdatedBy(currentUserId);
+            userRepository.save(user);
+            refreshTokenRepository.revokeActiveTokensByUserId(user.getId(), Instant.now());
 
-        auditService.record(AuditActions.USER_DELETED, user.getOrganizationId(), currentUserId,
-                "User", user.getId(), "User soft deleted", oldValues,
-                Map.of("status", user.getStatus().name()), servletRequest);
-        return toResponse(user);
+            auditService.record(AuditActions.USER_DELETED, user.getOrganizationId(), currentUserId,
+                    "User", user.getId(), "User soft deleted because order history exists", oldValues,
+                    Map.of("status", user.getStatus().name()), servletRequest);
+            return toResponse(user);
+        }
+
+        UserResponse deletedUser = toResponse(user);
+        UUID organizationId = user.getOrganizationId();
+        UUID deletedUserId = user.getId();
+        refreshTokenRepository.deleteByUserId(deletedUserId);
+        passwordResetTokenRepository.deleteByUserId(deletedUserId);
+        userRoleRepository.deleteByUserId(deletedUserId);
+        auditLogRepository.clearUserReferences(deletedUserId);
+        userRepository.delete(user);
+
+        auditService.record(AuditActions.USER_DELETED, organizationId, currentUserId,
+                "User", deletedUserId, "User hard deleted because no order history exists", oldValues,
+                Map.of("deleted", true), servletRequest);
+        return deletedUser;
     }
 
     @Override
     @Transactional
     public UserResponse assignRoles(UUID id, AssignRolesRequest request, HttpServletRequest servletRequest) {
         User user = findAccessibleUser(id);
+        User actor = currentUser();
+        roleDelegationService.validateTargetUserScope(actor, user);
         request.roleIds().forEach(roleId -> assignRole(user, roleId));
         auditService.record(AuditActions.ROLE_ASSIGNED, user.getOrganizationId(), SecurityContextHelper.getCurrentUserId(),
                 "User", user.getId(), "Roles assigned", null,
@@ -265,8 +316,11 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public UserResponse removeRole(UUID id, UUID roleId, HttpServletRequest servletRequest) {
         User user = findAccessibleUser(id);
+        User actor = currentUser();
+        roleDelegationService.validateTargetUserScope(actor, user);
         Role role = roleRepository.findById(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Role not found"));
+        roleDelegationService.validateCanAssignRole(actor, role);
         validateRoleAssignableToUser(user, role);
         userRoleRepository.deleteByUserIdAndRoleId(user.getId(), role.getId());
         auditService.record(AuditActions.ROLE_REMOVED, user.getOrganizationId(), SecurityContextHelper.getCurrentUserId(),
@@ -297,6 +351,9 @@ public class UserServiceImpl implements UserService {
         if (branchId == null && businessCustomerId == null && businessCustomerLocationId == null) return;
         if (branchId == null) throw new BadRequestException("branchId is required when assigning a business customer");
         Branch branch = branchRepository.findById(branchId).orElseThrow(() -> new ResourceNotFoundException("Branch not found"));
+        if (branch.getStatus() != BranchStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Branch not found");
+        }
         if (!organizationId.equals(branch.getOrganizationId())) throw new ForbiddenException("Branch belongs to another organization");
         UUID currentBranchId = SecurityContextHelper.isSuperAdmin() ? null : currentUserBranchId();
         if (currentBranchId != null && !currentBranchId.equals(branchId)) {
@@ -305,6 +362,9 @@ public class UserServiceImpl implements UserService {
         user.setBranchId(branchId);
         if (businessCustomerId != null) {
             BusinessCustomer customer = businessCustomerRepository.findById(businessCustomerId).orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+            if (customer.getStatus() != BusinessCustomerStatus.ACTIVE) {
+                throw new ResourceNotFoundException("Business customer not found");
+            }
             if (!branchId.equals(customer.getBranchId())) throw new ForbiddenException("Business customer belongs to another branch");
             user.setBusinessCustomerId(businessCustomerId);
         }
@@ -342,12 +402,26 @@ public class UserServiceImpl implements UserService {
     }
 
     private UUID resolveBranchFilter(UUID requestedBranchId, User currentUser) {
+        Branch requestedBranch = null;
+        if (requestedBranchId != null) {
+            requestedBranch = branchRepository.findById(requestedBranchId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Branch not found"));
+            if (requestedBranch.getStatus() != BranchStatus.ACTIVE) {
+                throw new ResourceNotFoundException("Branch not found");
+            }
+        }
+
         if (SecurityContextHelper.isSuperAdmin()) {
             return requestedBranchId;
         }
 
         UUID currentBranchId = currentUser.getBranchId();
         if (currentBranchId != null) {
+            Branch currentBranch = branchRepository.findById(currentBranchId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Branch not found"));
+            if (currentBranch.getStatus() != BranchStatus.ACTIVE) {
+                throw new ResourceNotFoundException("Branch not found");
+            }
             if (requestedBranchId != null && !requestedBranchId.equals(currentBranchId)) {
                 throw new ForbiddenException("Cannot access users from another branch");
             }
@@ -358,21 +432,33 @@ public class UserServiceImpl implements UserService {
             return null;
         }
 
-        Branch branch = branchRepository.findById(requestedBranchId)
-                .orElseThrow(() -> new ResourceNotFoundException("Branch not found"));
-        if (!SecurityContextHelper.getCurrentOrganizationId().equals(branch.getOrganizationId())) {
+        if (!SecurityContextHelper.getCurrentOrganizationId().equals(requestedBranch.getOrganizationId())) {
             throw new ForbiddenException("Cannot access users from another organization");
         }
         return requestedBranchId;
     }
 
     private UUID resolveBusinessCustomerFilter(UUID requestedBusinessCustomerId, UUID branchFilter, User currentUser) {
+        BusinessCustomer requestedCustomer = null;
+        if (requestedBusinessCustomerId != null) {
+            requestedCustomer = businessCustomerRepository.findById(requestedBusinessCustomerId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+            if (requestedCustomer.getStatus() != BusinessCustomerStatus.ACTIVE) {
+                throw new ResourceNotFoundException("Business customer not found");
+            }
+        }
+
         if (SecurityContextHelper.isSuperAdmin()) {
             return requestedBusinessCustomerId;
         }
 
         UUID currentBusinessCustomerId = currentUser.getBusinessCustomerId();
         if (currentBusinessCustomerId != null) {
+            BusinessCustomer currentCustomer = businessCustomerRepository.findById(currentBusinessCustomerId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+            if (currentCustomer.getStatus() != BusinessCustomerStatus.ACTIVE) {
+                throw new ResourceNotFoundException("Business customer not found");
+            }
             if (requestedBusinessCustomerId != null && !requestedBusinessCustomerId.equals(currentBusinessCustomerId)) {
                 throw new ForbiddenException("Cannot access users from another business customer");
             }
@@ -383,10 +469,8 @@ public class UserServiceImpl implements UserService {
             return null;
         }
 
-        BusinessCustomer customer = businessCustomerRepository.findById(requestedBusinessCustomerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
-        assertBusinessCustomerAccessible(customer, currentUser);
-        if (branchFilter != null && !branchFilter.equals(customer.getBranchId())) {
+        assertBusinessCustomerAccessible(requestedCustomer, currentUser);
+        if (branchFilter != null && !branchFilter.equals(requestedCustomer.getBranchId())) {
             throw new ForbiddenException("Business customer belongs to another branch");
         }
         return requestedBusinessCustomerId;
@@ -469,6 +553,11 @@ public class UserServiceImpl implements UserService {
         return name.isBlank() ? user.getEmail() : name;
     }
 
+    private boolean hasOrderMapping(UUID userId) {
+        return orderRepository.countByCreatedBy(userId) > 0
+                || orderApproverRepository.countByUserId(userId) > 0;
+    }
+
     private UUID currentUserBranchId() {
         return userRepository.findById(SecurityContextHelper.getCurrentUserId()).map(User::getBranchId).orElse(null);
     }
@@ -494,6 +583,9 @@ public class UserServiceImpl implements UserService {
     private void assignRole(User user, UUID roleId) {
         Role role = roleRepository.findById(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Role not found"));
+        User actor = currentUser();
+        roleDelegationService.validateTargetUserScope(actor, user);
+        roleDelegationService.validateCanAssignRole(actor, role);
         validateRoleAssignableToUser(user, role);
         if (!userRoleRepository.existsByUserIdAndRoleId(user.getId(), role.getId())) {
             UserRole userRole = new UserRole();
@@ -546,6 +638,7 @@ public class UserServiceImpl implements UserService {
             return null;
         }
         return organizationRepository.findById(organizationId)
+                .filter(organization -> organization.getStatus() == OrganizationStatus.ACTIVE)
                 .map(organization -> organization.getName())
                 .orElse(null);
     }
@@ -555,6 +648,7 @@ public class UserServiceImpl implements UserService {
             return null;
         }
         return branchRepository.findById(branchId)
+                .filter(branch -> branch.getStatus() == BranchStatus.ACTIVE)
                 .map(branch -> branch.getName())
                 .orElse(null);
     }
@@ -564,6 +658,7 @@ public class UserServiceImpl implements UserService {
             return null;
         }
         return businessCustomerRepository.findById(businessCustomerId)
+                .filter(customer -> customer.getStatus() == BusinessCustomerStatus.ACTIVE)
                 .map(customer -> customer.getName())
                 .orElse(null);
     }

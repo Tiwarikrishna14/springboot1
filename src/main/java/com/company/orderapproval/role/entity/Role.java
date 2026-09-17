@@ -41,6 +41,9 @@ public class Role {
     private boolean systemRole;
 
     @Column(nullable = false)
+    private Integer level = 10;
+
+    @Column(nullable = false)
     private boolean active = true;
 
     @Column(name = "created_at", nullable = false, updatable = false)

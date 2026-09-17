@@ -13,4 +13,6 @@ public interface PermissionRepository extends JpaRepository<Permission, UUID> {
     List<Permission> findByCodeIn(List<String> codes);
 
     List<Permission> findAllByOrderByModuleAscCodeAsc();
+
+    List<Permission> findByDelegationLevelLessThanEqualOrderByModuleAscCodeAsc(Integer delegationLevel);
 }

@@ -15,6 +15,15 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
     @Query("select ur from UserRole ur where ur.user.id = :userId")
     List<UserRole> findByUserId(@Param("userId") UUID userId);
 
+    @Query("""
+            select coalesce(max(r.level), 0)
+            from UserRole ur
+            join ur.role r
+            where ur.user.id = :userId
+              and r.active = true
+            """)
+    int findMaxRoleLevelByUserId(@Param("userId") UUID userId);
+
     @Query("select ur from UserRole ur where ur.user.id = :userId and ur.role.id = :roleId")
     Optional<UserRole> findByUserIdAndRoleId(@Param("userId") UUID userId, @Param("roleId") UUID roleId);
 
@@ -24,6 +33,10 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
     @Modifying
     @Query("delete from UserRole ur where ur.user.id = :userId and ur.role.id = :roleId")
     void deleteByUserIdAndRoleId(@Param("userId") UUID userId, @Param("roleId") UUID roleId);
+
+    @Modifying
+    @Query("delete from UserRole ur where ur.user.id = :userId")
+    void deleteByUserId(@Param("userId") UUID userId);
 
     @Query("""
             select r.name from UserRole ur

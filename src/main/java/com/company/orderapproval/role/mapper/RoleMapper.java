@@ -21,6 +21,7 @@ public interface RoleMapper {
                 base.name(),
                 base.description(),
                 base.systemRole(),
+                base.level(),
                 base.active(),
                 base.createdAt(),
                 base.updatedAt(),

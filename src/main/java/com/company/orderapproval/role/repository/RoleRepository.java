@@ -32,4 +32,17 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
                            Pageable pageable);
 
     List<Role> findByNameIn(List<String> names);
+
+    @Query("""
+            select r from Role r
+            where r.active = true
+              and r.level < :actorLevel
+              and (:includeAll = true
+                   or r.organizationId is null
+                   or r.organizationId = :organizationId)
+            order by r.level desc, r.name
+            """)
+    List<Role> findAssignableRoles(@Param("organizationId") UUID organizationId,
+                                   @Param("includeAll") boolean includeAll,
+                                   @Param("actorLevel") int actorLevel);
 }

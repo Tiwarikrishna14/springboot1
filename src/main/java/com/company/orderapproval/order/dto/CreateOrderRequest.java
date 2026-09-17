@@ -19,6 +19,11 @@ public record CreateOrderRequest(
         @Size(max = 255, message = "Location must be at most 255 characters")
         String location,
 
+        UUID businessCustomerLocationId,
+
+        @Size(max = 64, message = "Location code must be at most 64 characters")
+        String locationCode,
+
         @Size(max = 120, message = "Reference number must be at most 120 characters")
         String referenceNumber,
 

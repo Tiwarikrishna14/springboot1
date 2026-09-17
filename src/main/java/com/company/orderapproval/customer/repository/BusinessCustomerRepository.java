@@ -15,6 +15,9 @@ public interface BusinessCustomerRepository extends JpaRepository<BusinessCustom
  @Query("select c from BusinessCustomer c where (:organizationId is null or c.organizationId=:organizationId) and (:branchId is null or c.branchId=:branchId) and (:city is null or :city='' or lower(c.city)=lower(:city)) and (:status is null or c.status=:status) and (:search is null or :search='' or lower(c.name) like lower(concat('%',:search,'%')) or lower(c.customerCode) like lower(concat('%',:search,'%')))" )
  Page<BusinessCustomer> search(@Param("organizationId") UUID organizationId,@Param("branchId") UUID branchId,@Param("status") BusinessCustomerStatus status,@Param("city") String city,@Param("search") String search,Pageable p);
 
+ @Query("select c from BusinessCustomer c where (:organizationId is null or c.organizationId=:organizationId) and upper(c.customerCode)=upper(:customerCode) and c.status=:status")
+ List<BusinessCustomer> findByCustomerCodeInScope(@Param("organizationId") UUID organizationId,@Param("customerCode") String customerCode,@Param("status") BusinessCustomerStatus status);
+
  boolean existsByCustomerCode(String customerCode);
 
 }

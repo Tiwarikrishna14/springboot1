@@ -15,6 +15,8 @@ public record CreateRoleRequest(
         @Size(max = 500, message = "Description must be at most 500 characters")
         String description,
 
-        boolean systemRole
+        boolean systemRole,
+
+        Integer level
 ) {
 }

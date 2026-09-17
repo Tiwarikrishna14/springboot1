@@ -10,6 +10,7 @@ public record RoleResponse(
         String name,
         String description,
         boolean systemRole,
+        Integer level,
         boolean active,
         Instant createdAt,
         Instant updatedAt,

@@ -58,7 +58,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({ForbiddenException.class, AccessDeniedException.class})
     public ResponseEntity<ApiResponse<Void>> handleForbidden(RuntimeException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.failure("Access denied"));
+        String message = ex instanceof ForbiddenException ? ex.getMessage() : "Access denied";
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.failure(message));
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

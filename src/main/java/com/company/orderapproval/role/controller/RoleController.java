@@ -55,6 +55,13 @@ public class RoleController {
         ));
     }
 
+    @Operation(summary = "List assignable roles")
+    @GetMapping("/roles/assignable")
+    @PreAuthorize("hasAuthority('ROLE_VIEW')")
+    public ResponseEntity<ApiResponse<List<RoleResponse>>> assignableRoles() {
+        return ResponseEntity.ok(ApiResponse.success("Assignable roles fetched successfully", roleService.assignable()));
+    }
+
     @Operation(summary = "Get role by id")
     @GetMapping("/roles/{id}")
     @PreAuthorize("hasAuthority('ROLE_VIEW')")
@@ -109,5 +116,12 @@ public class RoleController {
     @PreAuthorize("hasAuthority('ROLE_VIEW')")
     public ResponseEntity<ApiResponse<List<PermissionResponse>>> permissions() {
         return ResponseEntity.ok(ApiResponse.success("Permissions fetched successfully", permissionService.list()));
+    }
+
+    @Operation(summary = "List assignable permissions")
+    @GetMapping("/permissions/assignable")
+    @PreAuthorize("hasAuthority('ROLE_VIEW')")
+    public ResponseEntity<ApiResponse<List<PermissionResponse>>> assignablePermissions() {
+        return ResponseEntity.ok(ApiResponse.success("Assignable permissions fetched successfully", permissionService.assignable()));
     }
 }

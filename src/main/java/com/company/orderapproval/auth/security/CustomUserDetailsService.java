@@ -1,7 +1,9 @@
 package com.company.orderapproval.auth.security;
 
 import com.company.orderapproval.common.exception.ResourceNotFoundException;
+import com.company.orderapproval.common.exception.UnauthorizedException;
 import com.company.orderapproval.user.entity.User;
+import com.company.orderapproval.user.entity.UserStatus;
 import com.company.orderapproval.user.repository.UserRepository;
 import com.company.orderapproval.user.repository.UserRoleRepository;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -43,6 +45,9 @@ public class CustomUserDetailsService implements UserDetailsService {
     }
 
     public AuthenticatedUser loadPrincipal(User user) {
+        if (user.getStatus() != UserStatus.ACTIVE || user.isLockedNow()) {
+            throw new UnauthorizedException("Account is not active");
+        }
         return new AuthenticatedUser(
                 user.getId(),
                 user.getOrganizationId(),

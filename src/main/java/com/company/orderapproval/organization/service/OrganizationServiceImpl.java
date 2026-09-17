@@ -79,21 +79,29 @@ public class OrganizationServiceImpl implements OrganizationService {
     @Override
     public Page<OrganizationResponse> list(Pageable pageable) {
         if (SecurityContextHelper.isSuperAdmin()) {
-            return organizationRepository.findAll(pageable).map(organizationMapper::toResponse);
+            return organizationRepository.findByStatus(OrganizationStatus.ACTIVE, pageable).map(organizationMapper::toResponse);
         }
         UUID currentOrganizationId = SecurityContextHelper.getCurrentOrganizationId();
         return organizationRepository.findById(currentOrganizationId)
+                .filter(organization -> organization.getStatus() == OrganizationStatus.ACTIVE)
                 .map(organization -> new org.springframework.data.domain.PageImpl<>(
                         java.util.List.of(organizationMapper.toResponse(organization)),
                         pageable,
                         1
                 ))
-                .orElseThrow(() -> new ResourceNotFoundException("Organization not found"));
+                .orElse(new org.springframework.data.domain.PageImpl<>(
+                        java.util.List.of(),
+                        pageable,
+                        0
+                ));
     }
 
     @Override
     public OrganizationResponse get(UUID id) {
         Organization organization = findAccessibleOrganization(id);
+        if (organization.getStatus() != OrganizationStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Organization not found");
+        }
         return organizationMapper.toResponse(organization);
     }
 

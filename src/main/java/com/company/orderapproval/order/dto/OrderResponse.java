@@ -22,6 +22,7 @@ public record OrderResponse(
         String remarks,
         String priority,
         String location,
+        OrderLocationResponse locationDetails,
         String referenceNumber,
         OrderStatus status,
         LocalDate expectedDeliveryDate,

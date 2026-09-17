@@ -23,10 +23,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtTokenService jwtTokenService;
+    private final CustomUserDetailsService customUserDetailsService;
     private final ObjectMapper objectMapper;
 
-    public JwtAuthenticationFilter(JwtTokenService jwtTokenService, ObjectMapper objectMapper) {
+    public JwtAuthenticationFilter(JwtTokenService jwtTokenService,
+                                   CustomUserDetailsService customUserDetailsService,
+                                   ObjectMapper objectMapper) {
         this.jwtTokenService = jwtTokenService;
+        this.customUserDetailsService = customUserDetailsService;
         this.objectMapper = objectMapper;
     }
 
@@ -42,7 +46,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             String token = authorization.substring(BEARER_PREFIX.length());
-            AuthenticatedUser authenticatedUser = jwtTokenService.parseAuthenticatedUser(token);
+            AuthenticatedUser tokenUser = jwtTokenService.parseAuthenticatedUser(token);
+            AuthenticatedUser authenticatedUser = customUserDetailsService.loadPrincipalByUserId(tokenUser.userId());
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                     authenticatedUser,
                     null,

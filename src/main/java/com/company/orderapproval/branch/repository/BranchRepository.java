@@ -1,10 +1,13 @@
 package com.company.orderapproval.branch.repository;
 import com.company.orderapproval.branch.entity.Branch;
+import com.company.orderapproval.branch.entity.BranchStatus;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.*;
 public interface BranchRepository extends JpaRepository<Branch, UUID> {
     Optional<Branch> findByOrganizationIdAndBranchCode(UUID organizationId, String branchCode);
     Page<Branch> findByOrganizationId(UUID organizationId, Pageable pageable);
+    Page<Branch> findByStatus(BranchStatus status, Pageable pageable);
+    Page<Branch> findByOrganizationIdAndStatus(UUID organizationId, BranchStatus status, Pageable pageable);
     long countByOrganizationId(UUID organizationId);
 }

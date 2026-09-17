@@ -11,6 +11,8 @@ public record UpdateRoleRequest(
         @Size(max = 500, message = "Description must be at most 500 characters")
         String description,
 
-        boolean active
+        boolean active,
+
+        Integer level
 ) {
 }

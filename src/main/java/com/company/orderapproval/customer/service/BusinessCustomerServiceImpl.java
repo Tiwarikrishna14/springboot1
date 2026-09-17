@@ -71,7 +71,10 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
                                                BusinessCustomerStatus status,
                                                String search,
                                                Pageable p) {
-        BusinessCustomerStatus effectiveStatus = status == null ? BusinessCustomerStatus.ACTIVE : status;
+        if (status != null && status != BusinessCustomerStatus.ACTIVE) {
+            return Page.empty(p);
+        }
+        BusinessCustomerStatus effectiveStatus = BusinessCustomerStatus.ACTIVE;
         UUID org = SecurityContextHelper.isSuperAdmin() ? organizationId : SecurityContextHelper.getCurrentOrganizationId();
         UUID scopedBranch = branchId;
 
@@ -98,6 +101,9 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
 
     public BusinessCustomerResponse get(UUID id) {
         BusinessCustomer customer = access(id);
+        if (customer.getStatus() != BusinessCustomerStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Business customer not found");
+        }
         enforceBranchScopeIfPresent(customer);
         return response(customer);
     }

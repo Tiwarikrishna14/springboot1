@@ -24,8 +24,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -37,19 +40,22 @@ public class RoleServiceImpl implements RoleService {
     private final OrganizationRepository organizationRepository;
     private final RoleMapper roleMapper;
     private final AuditService auditService;
+    private final RoleDelegationService roleDelegationService;
 
     public RoleServiceImpl(RoleRepository roleRepository,
                            RolePermissionRepository rolePermissionRepository,
                            PermissionRepository permissionRepository,
                            OrganizationRepository organizationRepository,
                            RoleMapper roleMapper,
-                           AuditService auditService) {
+                           AuditService auditService,
+                           RoleDelegationService roleDelegationService) {
         this.roleRepository = roleRepository;
         this.rolePermissionRepository = rolePermissionRepository;
         this.permissionRepository = permissionRepository;
         this.organizationRepository = organizationRepository;
         this.roleMapper = roleMapper;
         this.auditService = auditService;
+        this.roleDelegationService = roleDelegationService;
     }
 
     @Override
@@ -58,6 +64,14 @@ public class RoleServiceImpl implements RoleService {
         UUID organizationId = includeAll ? null : SecurityContextHelper.getCurrentOrganizationId();
         return roleRepository.searchRoles(organizationId, includeAll, search, pageable)
                 .map(this::toResponse);
+    }
+
+    @Override
+    public List<RoleResponse> assignable() {
+        return roleDelegationService.getAssignableRoles(roleDelegationService.currentUser())
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 
     @Override
@@ -79,6 +93,7 @@ public class RoleServiceImpl implements RoleService {
         role.setName(name);
         role.setDescription(request.description());
         role.setSystemRole(request.systemRole() && SecurityContextHelper.isSuperAdmin());
+        role.setLevel(roleDelegationService.resolveRoleLevelForCreate(roleDelegationService.currentUser(), request.level()));
         role.setActive(true);
         roleRepository.save(role);
         auditService.record(AuditActions.ROLE_CREATED, organizationId, SecurityContextHelper.getCurrentUserId(),
@@ -92,6 +107,7 @@ public class RoleServiceImpl implements RoleService {
     public RoleResponse update(UUID id, UpdateRoleRequest request, HttpServletRequest servletRequest) {
         Role role = findAccessibleRole(id);
         enforceSystemRoleWrite(role);
+        roleDelegationService.validateCanManageRole(roleDelegationService.currentUser(), role);
         String name = normalizeName(request.name());
         if (!name.equals(role.getName()) && roleExists(name, role.getOrganizationId())) {
             throw new ConflictException("Role already exists");
@@ -103,6 +119,10 @@ public class RoleServiceImpl implements RoleService {
         );
         role.setName(name);
         role.setDescription(request.description());
+        if (request.level() != null) {
+            roleDelegationService.validateRoleLevelForWrite(roleDelegationService.currentUser(), request.level());
+            role.setLevel(request.level());
+        }
         role.setActive(request.active());
         roleRepository.save(role);
         auditService.record(AuditActions.ROLE_UPDATED, role.getOrganizationId(), SecurityContextHelper.getCurrentUserId(),
@@ -118,9 +138,28 @@ public class RoleServiceImpl implements RoleService {
                                           HttpServletRequest servletRequest) {
         Role role = findAccessibleRole(id);
         enforceSystemRoleWrite(role);
-        request.permissionIds().forEach(permissionId -> {
-            Permission permission = permissionRepository.findById(permissionId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Permission not found"));
+        roleDelegationService.validateCanManageRole(roleDelegationService.currentUser(), role);
+        List<Permission> permissions = permissionRepository.findAllById(request.permissionIds());
+        Set<UUID> foundPermissionIds = new HashSet<>();
+        permissions.forEach(permission -> foundPermissionIds.add(permission.getId()));
+        request.permissionIds().stream()
+                .filter(permissionId -> !foundPermissionIds.contains(permissionId))
+                .findFirst()
+                .ifPresent(permissionId -> {
+                    throw new ResourceNotFoundException("Permission not found");
+                });
+        roleDelegationService.validateCanAssignPermissions(roleDelegationService.currentUser(), permissions);
+        int actorLevel = roleDelegationService.getCurrentUserEffectiveLevel();
+        Set<UUID> submittedPermissionIds = new HashSet<>(request.permissionIds());
+        List<RolePermission> existingRolePermissions = rolePermissionRepository.findByRoleId(role.getId());
+        existingRolePermissions.stream()
+                .filter(rolePermission -> rolePermission.getPermission().getDelegationLevel() <= actorLevel)
+                .filter(rolePermission -> !submittedPermissionIds.contains(rolePermission.getPermission().getId()))
+                .forEach(rolePermission -> rolePermissionRepository.deleteByRoleIdAndPermissionId(
+                        role.getId(),
+                        rolePermission.getPermission().getId()
+                ));
+        permissions.forEach(permission -> {
             if (!rolePermissionRepository.existsByRoleIdAndPermissionId(role.getId(), permission.getId())) {
                 RolePermission rolePermission = new RolePermission();
                 rolePermission.setRole(role);
@@ -139,8 +178,10 @@ public class RoleServiceImpl implements RoleService {
     public RoleResponse removePermission(UUID id, UUID permissionId, HttpServletRequest servletRequest) {
         Role role = findAccessibleRole(id);
         enforceSystemRoleWrite(role);
+        roleDelegationService.validateCanManageRole(roleDelegationService.currentUser(), role);
         Permission permission = permissionRepository.findById(permissionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Permission not found"));
+        roleDelegationService.validateCanAssignPermission(roleDelegationService.currentUser(), permission);
         rolePermissionRepository.deleteByRoleIdAndPermissionId(role.getId(), permission.getId());
         auditService.record(AuditActions.ROLE_UPDATED, role.getOrganizationId(), SecurityContextHelper.getCurrentUserId(),
                 "Role", role.getId(), "Permission removed from role",

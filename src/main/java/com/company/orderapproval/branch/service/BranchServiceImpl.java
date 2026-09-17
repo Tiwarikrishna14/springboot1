@@ -73,8 +73,9 @@ public class BranchServiceImpl implements BranchService {
 
    UUID branchId = currentBranch();
 
-   if (branchId != null) {
+   if (branchId != null && !hasOrganizationWideBranchAccess()) {
     return repo.findById(branchId)
+            .filter(b -> b.getStatus() == BranchStatus.ACTIVE)
             .map(b -> new PageImpl<>(
                     List.of(response(b)),
                     p,
@@ -91,13 +92,17 @@ public class BranchServiceImpl implements BranchService {
   }
 
   return (org == null
-          ? repo.findAll(p)
-          : repo.findByOrganizationId(org, p)
+          ? repo.findByStatus(BranchStatus.ACTIVE, p)
+          : repo.findByOrganizationIdAndStatus(org, BranchStatus.ACTIVE, p)
   ).map(this::response);
  }
 
  public BranchResponse get(UUID id) {
-  return response(access(id));
+  Branch branch = access(id);
+  if (branch.getStatus() != BranchStatus.ACTIVE) {
+   throw new ResourceNotFoundException("Branch not found");
+  }
+  return response(branch);
  }
 
  @Transactional
@@ -250,7 +255,7 @@ public class BranchServiceImpl implements BranchService {
    );
   }
 
-  UUID current = currentBranch();
+  UUID current = hasOrganizationWideBranchAccess() ? null : currentBranch();
 
   if (current != null && !current.equals(id)) {
    throw new ForbiddenException(
@@ -301,6 +306,11 @@ public class BranchServiceImpl implements BranchService {
   return users.findById(
           SecurityContextHelper.getCurrentUserId()
   ).map(User::getBranchId).orElse(null);
+ }
+
+ private boolean hasOrganizationWideBranchAccess() {
+  return SecurityContextHelper.isSuperAdmin()
+          || SecurityContextHelper.hasRole("ORGANIZATION_ADMIN");
  }
 
  private BranchResponse response(Branch b) {

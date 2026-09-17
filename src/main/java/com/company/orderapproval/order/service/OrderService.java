@@ -8,6 +8,9 @@ import com.company.orderapproval.common.exception.ResourceNotFoundException;
 import com.company.orderapproval.common.exception.ValidationException;
 import com.company.orderapproval.common.util.SecurityContextHelper;
 import com.company.orderapproval.customer.entity.BusinessCustomer;
+import com.company.orderapproval.customer.entity.BusinessCustomerStatus;
+import com.company.orderapproval.customer.location.entity.BusinessCustomerLocation;
+import com.company.orderapproval.customer.location.entity.BusinessCustomerLocationStatus;
 import com.company.orderapproval.customer.location.repository.BusinessCustomerLocationRepository;
 import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
 import com.company.orderapproval.order.dto.ApprovalAction;
@@ -16,6 +19,7 @@ import com.company.orderapproval.order.dto.CreateOrderRequest;
 import com.company.orderapproval.order.dto.OrderApproverResponse;
 import com.company.orderapproval.order.dto.OrderItemRequest;
 import com.company.orderapproval.order.dto.OrderItemResponse;
+import com.company.orderapproval.order.dto.OrderLocationResponse;
 import com.company.orderapproval.order.dto.OrderResponse;
 import com.company.orderapproval.order.dto.SupplierAction;
 import com.company.orderapproval.order.dto.SupplierActionRequest;
@@ -115,9 +119,7 @@ public class OrderService {
         order.setBusinessCustomerName(customer.getName());
         order.setCreatedBy(creator.getId());
         applyFields(order, request.notes(), request.remarks(), request.priority(), request.location(), request.referenceNumber());
-        if (order.getLocation() == null) {
-            order.setLocation(defaultLocationName(creator.getBusinessCustomerLocationId()));
-        }
+        applyOrderLocation(order, creator, customer, request.businessCustomerLocationId(), request.locationCode(), request.location(), true);
 
         syncItems(order, request.products(), customer);
         syncApprovers(order, request.approverIds(), customer.getId());
@@ -141,6 +143,7 @@ public class OrderService {
         boolean productsExplicitlyRemoved = request.products() != null && request.products().isEmpty() && hadProducts;
 
         applyFields(order, request.notes(), request.remarks(), request.priority(), request.location(), request.referenceNumber());
+        applyOrderLocation(order, actor, customer, request.businessCustomerLocationId(), request.locationCode(), request.location(), false);
         syncItems(order, request.products(), customer);
         syncApprovers(order, request.approverIds(), customer.getId());
 
@@ -520,6 +523,95 @@ public class OrderService {
         order.setReferenceNumber(cleanOptional(referenceNumber));
     }
 
+    private void applyOrderLocation(Order order,
+                                    User actor,
+                                    BusinessCustomer customer,
+                                    UUID requestedLocationId,
+                                    String requestedLocationCode,
+                                    String requestedLocationText,
+                                    boolean useActorDefault) {
+        BusinessCustomerLocation location = resolveOrderLocation(
+                actor,
+                customer,
+                requestedLocationId,
+                requestedLocationCode,
+                useActorDefault
+        );
+        if (location != null) {
+            order.setBusinessCustomerLocationId(location.getId());
+            order.setLocation(locationSummary(location));
+            return;
+        }
+        if (cleanOptional(requestedLocationText) != null) {
+            order.setBusinessCustomerLocationId(null);
+            return;
+        }
+        if (order.getBusinessCustomerLocationId() != null) {
+            businessCustomerLocationRepository.findById(order.getBusinessCustomerLocationId())
+                    .ifPresent(existingLocation -> order.setLocation(locationSummary(existingLocation)));
+        }
+    }
+
+    private BusinessCustomerLocation resolveOrderLocation(User actor,
+                                                         BusinessCustomer customer,
+                                                         UUID requestedLocationId,
+                                                         String requestedLocationCode,
+                                                         boolean useActorDefault) {
+        UUID effectiveLocationId = requestedLocationId;
+        String effectiveLocationCode = cleanOptional(requestedLocationCode);
+        if (effectiveLocationId == null && effectiveLocationCode == null && useActorDefault) {
+            effectiveLocationId = actor.getBusinessCustomerLocationId();
+        }
+
+        BusinessCustomerLocation byId = null;
+        if (effectiveLocationId != null) {
+            byId = activeLocation(effectiveLocationId);
+            assertLocationBelongsToCustomer(byId, customer.getId());
+        }
+
+        BusinessCustomerLocation byCode = null;
+        if (effectiveLocationCode != null) {
+            byCode = businessCustomerLocationRepository.findByBusinessCustomerIdAndLocationCode(
+                            customer.getId(),
+                            effectiveLocationCode.trim().toUpperCase(Locale.ROOT)
+                    )
+                    .filter(location -> location.getStatus() == BusinessCustomerLocationStatus.ACTIVE)
+                    .orElseThrow(() -> new ResourceNotFoundException("Business customer location not found"));
+        }
+
+        if (byId != null && byCode != null && !byId.getId().equals(byCode.getId())) {
+            throw new BadRequestException("businessCustomerLocationId and locationCode refer to different locations");
+        }
+        return byId != null ? byId : byCode;
+    }
+
+    private BusinessCustomerLocation activeLocation(UUID locationId) {
+        BusinessCustomerLocation location = businessCustomerLocationRepository.findById(locationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Business customer location not found"));
+        if (location.getStatus() != BusinessCustomerLocationStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Business customer location not found");
+        }
+        return location;
+    }
+
+    private void assertLocationBelongsToCustomer(BusinessCustomerLocation location, UUID businessCustomerId) {
+        if (!businessCustomerId.equals(location.getBusinessCustomerId())) {
+            throw new ForbiddenException("Location belongs to another business customer");
+        }
+    }
+
+    private String locationSummary(BusinessCustomerLocation location) {
+        List<String> parts = new ArrayList<>();
+        parts.add(location.getLocationCode());
+        parts.add(location.getLocationName());
+        parts.add(location.getCity());
+        return parts.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .collect(Collectors.joining(" - "));
+    }
+
     private Order findDetailedForUpdate(UUID orderId) {
         if (orderId == null) {
             throw new BadRequestException("Order id is required");
@@ -549,8 +641,12 @@ public class OrderService {
     }
 
     private BusinessCustomer businessCustomer(UUID businessCustomerId) {
-        return businessCustomerRepository.findById(businessCustomerId)
+        BusinessCustomer customer = businessCustomerRepository.findById(businessCustomerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Business customer not found"));
+        if (customer.getStatus() != BusinessCustomerStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Business customer not found");
+        }
+        return customer;
     }
 
     private String defaultLocationName(UUID businessCustomerLocationId) {
@@ -743,6 +839,7 @@ public class OrderService {
                 order.getRemarks(),
                 order.getPriority(),
                 order.getLocation(),
+                locationResponse(order.getBusinessCustomerLocationId()),
                 order.getReferenceNumber(),
                 order.getStatus(),
                 order.getExpectedDeliveryDate(),
@@ -753,6 +850,29 @@ public class OrderService {
                 itemResponses,
                 approverResponses
         );
+    }
+
+    private OrderLocationResponse locationResponse(UUID locationId) {
+        if (locationId == null) {
+            return null;
+        }
+        return businessCustomerLocationRepository.findById(locationId)
+                .map(location -> new OrderLocationResponse(
+                        location.getId(),
+                        location.getBusinessCustomerId(),
+                        location.getOrganizationId(),
+                        location.getBranchId(),
+                        location.getLocationCode(),
+                        location.getLocationName(),
+                        location.getCity(),
+                        location.getState(),
+                        location.getAddress(),
+                        location.getPermanentAddress(),
+                        location.getCorrespondingAddress(),
+                        location.isSameAsPermanentAddress(),
+                        location.getPincode()
+                ))
+                .orElse(null);
     }
 
     private void audit(Order order, String action, String description, HttpServletRequest servletRequest) {

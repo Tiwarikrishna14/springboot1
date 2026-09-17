@@ -38,6 +38,9 @@ public class Permission {
     @Column(nullable = false, length = 80)
     private String module;
 
+    @Column(name = "delegation_level", nullable = false)
+    private Integer delegationLevel = 100;
+
     @PrePersist
     void prePersist() {
         if (code != null) {

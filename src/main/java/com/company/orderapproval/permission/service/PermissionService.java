@@ -6,4 +6,6 @@ import java.util.List;
 
 public interface PermissionService {
     List<PermissionResponse> list();
+
+    List<PermissionResponse> assignable();
 }

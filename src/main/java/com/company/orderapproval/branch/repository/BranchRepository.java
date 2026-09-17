@@ -6,4 +6,5 @@ import java.util.*;
 public interface BranchRepository extends JpaRepository<Branch, UUID> {
     Optional<Branch> findByOrganizationIdAndBranchCode(UUID organizationId, String branchCode);
     Page<Branch> findByOrganizationId(UUID organizationId, Pageable pageable);
+    long countByOrganizationId(UUID organizationId);
 }

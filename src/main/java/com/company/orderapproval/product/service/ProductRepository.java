@@ -7,6 +7,8 @@ import com.company.orderapproval.product.entity.Product;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
+
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
     boolean existsByCustomerSellCodeAndNavItemCode( String customerSellCode, String navItemCode );
@@ -14,5 +16,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     boolean existsByCustomerSellCodeAndNavItemCodeAndIdNot(String customerSellCode, String navItemCode, Long id);
 
     Page<Product> findByCustomerSellCode(String customerCode, Pageable pageable);
+
+    long countByCustomerSellCodeIn(Collection<String> customerSellCodes);
 
 }

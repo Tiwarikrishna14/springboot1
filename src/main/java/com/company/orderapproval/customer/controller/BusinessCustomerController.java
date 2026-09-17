@@ -47,9 +47,17 @@ public class BusinessCustomerController {
         return ResponseEntity.ok(ApiResponse.success("Business customer updated successfully", service.update(id, r, h)));
     }
 
+    @GetMapping("/{id}/delete-validation")
+    @PreAuthorize("hasAuthority('CUSTOMER_UPDATE')")
+    public ResponseEntity<ApiResponse<DeleteValidationResponse>> validateDelete(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success("Business customer delete validation fetched successfully", service.validateDelete(id)));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('CUSTOMER_UPDATE')")
-    public ResponseEntity<ApiResponse<BusinessCustomerResponse>> delete(@PathVariable UUID id, HttpServletRequest h) {
-        return ResponseEntity.ok(ApiResponse.success("Business customer deleted successfully", service.delete(id, h)));
+    public ResponseEntity<ApiResponse<BusinessCustomerResponse>> delete(@PathVariable UUID id,
+                                                                        @RequestParam(defaultValue = "false") boolean force,
+                                                                        HttpServletRequest h) {
+        return ResponseEntity.ok(ApiResponse.success("Business customer deactivated successfully", service.delete(id, force, h)));
     }
 }

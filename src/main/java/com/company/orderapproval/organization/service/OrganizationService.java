@@ -1,5 +1,6 @@
 package com.company.orderapproval.organization.service;
 
+import com.company.orderapproval.common.response.DeleteValidationResponse;
 import com.company.orderapproval.organization.dto.CreateOrganizationRequest;
 import com.company.orderapproval.organization.dto.OrganizationResponse;
 import com.company.orderapproval.organization.dto.UpdateOrganizationRequest;
@@ -20,4 +21,8 @@ public interface OrganizationService {
     OrganizationResponse update(UUID id, UpdateOrganizationRequest request, HttpServletRequest servletRequest);
 
     OrganizationResponse updateStatus(UUID id, UpdateOrganizationStatusRequest request, HttpServletRequest servletRequest);
+
+    DeleteValidationResponse validateDelete(UUID id);
+
+    OrganizationResponse delete(UUID id, boolean force, HttpServletRequest servletRequest);
 }

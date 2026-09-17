@@ -19,6 +19,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     boolean existsByEmail(String email);
 
+    long countByBusinessCustomerId(UUID businessCustomerId);
+
+    long countByBranchId(UUID branchId);
+
+    long countByOrganizationId(UUID organizationId);
+
     @Query("""
             select u from User u
             where (:organizationId is null or u.organizationId = :organizationId)

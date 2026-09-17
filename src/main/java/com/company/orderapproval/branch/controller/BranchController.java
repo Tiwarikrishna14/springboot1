@@ -47,4 +47,18 @@ public class BranchController {
     public ResponseEntity<ApiResponse<BranchResponse>> update(@PathVariable UUID id, @Valid @RequestBody UpdateBranchRequest r, HttpServletRequest h) {
         return ResponseEntity.ok(ApiResponse.success("Branch updated successfully", service.update(id, r, h)));
     }
+
+    @GetMapping("/{id}/delete-validation")
+    @PreAuthorize("hasAuthority('BRANCH_UPDATE')")
+    public ResponseEntity<ApiResponse<DeleteValidationResponse>> validateDelete(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success("Branch delete validation fetched successfully", service.validateDelete(id)));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('BRANCH_UPDATE')")
+    public ResponseEntity<ApiResponse<BranchResponse>> delete(@PathVariable UUID id,
+                                                              @RequestParam(defaultValue = "false") boolean force,
+                                                              HttpServletRequest h) {
+        return ResponseEntity.ok(ApiResponse.success("Branch deactivated successfully", service.delete(id, force, h)));
+    }
 }

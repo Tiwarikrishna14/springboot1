@@ -3,6 +3,8 @@ import com.company.orderapproval.customer.entity.BusinessCustomer; import com.co
 public interface BusinessCustomerRepository extends JpaRepository<BusinessCustomer,UUID>{
 
  Optional<BusinessCustomer> findByBranchIdAndCustomerCode(UUID branchId,String code);
+ Optional<BusinessCustomerStatus> findStatusByBranchIdAndCustomerCode(UUID branchId,String code);
+ boolean existsByBranchIdAndCustomerCodeAndIdNot(UUID branchId,String code,UUID id);
  long countByBranchId(UUID branchId);
  long countByOrganizationId(UUID organizationId);
  @Query("select c.customerCode from BusinessCustomer c where c.branchId=:branchId")

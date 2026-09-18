@@ -51,6 +51,9 @@ public class CustomUserDetailsService implements UserDetailsService {
         return new AuthenticatedUser(
                 user.getId(),
                 user.getOrganizationId(),
+                user.getBranchId(),
+                user.getBusinessCustomerId(),
+                user.getBusinessCustomerLocationId(),
                 user.getEmail(),
                 userRoleRepository.findRoleNamesByUserId(user.getId()),
                 userRoleRepository.findPermissionCodesByUserId(user.getId())

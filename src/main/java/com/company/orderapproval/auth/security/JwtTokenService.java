@@ -17,6 +17,7 @@ import java.util.UUID;
 @Service
 public class JwtTokenService {
 
+    private static final int TOKEN_VERSION = 2;
     private final JwtProperties jwtProperties;
     private final SecretKey signingKey;
 
@@ -34,8 +35,12 @@ public class JwtTokenService {
         Instant expiresAt = now.plusSeconds(jwtProperties.accessExpirationSeconds());
         return Jwts.builder()
                 .subject(user.email())
+                .claim("tokenVersion", TOKEN_VERSION)
                 .claim("userId", user.userId().toString())
                 .claim("organizationId", user.organizationId().toString())
+                .claim("branchId", uuidValue(user.branchId()))
+                .claim("businessCustomerId", uuidValue(user.businessCustomerId()))
+                .claim("businessCustomerLocationId", uuidValue(user.businessCustomerLocationId()))
                 .claim("email", user.email())
                 .claim("roles", user.roles())
                 .claim("permissions", user.permissions())
@@ -52,13 +57,22 @@ public class JwtTokenService {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+            Integer tokenVersion = claims.get("tokenVersion", Integer.class);
+            if (tokenVersion == null || tokenVersion != TOKEN_VERSION) {
+                throw new UnauthorizedException("Access token is outdated. Please log in again");
+            }
             return new AuthenticatedUser(
                     UUID.fromString(claims.get("userId", String.class)),
                     UUID.fromString(claims.get("organizationId", String.class)),
+                    nullableUuid(claims, "branchId"),
+                    nullableUuid(claims, "businessCustomerId"),
+                    nullableUuid(claims, "businessCustomerLocationId"),
                     claims.get("email", String.class),
                     claimList(claims, "roles"),
                     claimList(claims, "permissions")
             );
+        } catch (UnauthorizedException ex) {
+            throw ex;
         } catch (JwtException | IllegalArgumentException ex) {
             throw new UnauthorizedException("Invalid or expired JWT token");
         }
@@ -70,6 +84,15 @@ public class JwtTokenService {
 
     public long refreshTokenExpiresInSeconds() {
         return jwtProperties.refreshExpirationSeconds();
+    }
+
+    private String uuidValue(UUID value) {
+        return value == null ? null : value.toString();
+    }
+
+    private UUID nullableUuid(Claims claims, String name) {
+        String value = claims.get(name, String.class);
+        return value == null || value.isBlank() ? null : UUID.fromString(value);
     }
 
     @SuppressWarnings("unchecked")

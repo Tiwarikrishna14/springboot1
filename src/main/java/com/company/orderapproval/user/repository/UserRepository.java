@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
@@ -24,6 +25,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     long countByBranchId(UUID branchId);
 
     long countByOrganizationId(UUID organizationId);
+
+    @Modifying
+    @Query("update User u set u.branchId = :branchId, u.updatedBy = :updatedBy, u.updatedAt = CURRENT_TIMESTAMP where u.businessCustomerId = :customerId")
+    int transferBusinessCustomerUsers(@Param("customerId") UUID customerId,
+                                      @Param("branchId") UUID branchId,
+                                      @Param("updatedBy") UUID updatedBy);
 
     @Query("""
             select u from User u

@@ -68,8 +68,9 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(ConflictException.class)
-    public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.failure(ex.getMessage()));
+    public ResponseEntity<ApiResponse<ConflictException.ConflictData>> handleConflict(ConflictException ex) {
+        ConflictException.ConflictData conflictData = new ConflictException.ConflictData(ex.isCanReactivate());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.failure(ex.getMessage(), conflictData));
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)

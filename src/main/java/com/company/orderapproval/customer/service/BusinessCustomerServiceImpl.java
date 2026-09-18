@@ -1,6 +1,7 @@
 package com.company.orderapproval.customer.service;
 
 import com.company.orderapproval.branch.entity.Branch;
+import com.company.orderapproval.branch.entity.BranchStatus;
 import com.company.orderapproval.branch.repository.BranchRepository;
 import com.company.orderapproval.common.exception.BadRequestException;
 import com.company.orderapproval.common.exception.ConflictException;
@@ -11,6 +12,8 @@ import com.company.orderapproval.common.util.SecurityContextHelper;
 import com.company.orderapproval.customer.dto.BusinessCustomerResponse;
 import com.company.orderapproval.customer.dto.CreateBusinessCustomerRequest;
 import com.company.orderapproval.customer.dto.UpdateBusinessCustomerRequest;
+import com.company.orderapproval.customer.dto.TransferBusinessCustomerBranchRequest;
+import com.company.orderapproval.customer.location.repository.BusinessCustomerLocationRepository;
 import com.company.orderapproval.customer.entity.BusinessCustomer;
 import com.company.orderapproval.customer.entity.BusinessCustomerStatus;
 import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
@@ -20,6 +23,7 @@ import com.company.orderapproval.product.service.ProductRepository;
 import com.company.orderapproval.user.entity.User;
 import com.company.orderapproval.user.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -31,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -52,17 +57,20 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
     private final UserRepository users;
     private final OrderRepository orders;
     private final ProductRepository products;
+    private final BusinessCustomerLocationRepository locations;
 
     public BusinessCustomerServiceImpl(BusinessCustomerRepository repo,
                                        BranchRepository branches,
                                        UserRepository users,
                                        OrderRepository orders,
-                                       ProductRepository products) {
+                                       ProductRepository products,
+                                       BusinessCustomerLocationRepository locations) {
         this.repo = repo;
         this.branches = branches;
         this.users = users;
         this.orders = orders;
         this.products = products;
+        this.locations = locations;
     }
 
     public Page<BusinessCustomerResponse> list(UUID organizationId,
@@ -114,9 +122,20 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
         enforceBranchScope(branch);
 
         String code = request.customerCode().trim().toUpperCase(Locale.ROOT);
-        if (repo.findByBranchIdAndCustomerCode(branchId, code).isPresent()) {
-            throw new ConflictException("Customer code already exists in branch");
-        }
+        Optional<BusinessCustomerStatus> status = repo.findStatusByBranchIdAndCustomerCode(branchId, code);
+    status.ifPresent(branchStatus -> {
+
+    if (branchStatus == BusinessCustomerStatus.ACTIVE) {
+        throw new ConflictException(
+                "Customer code already exists in branch"
+        );
+    }
+
+    if (branchStatus == BusinessCustomerStatus.INACTIVE) {
+        throw new ConflictException(
+                "Customer code already exists but is inactive. Do you want to reactivate it?", true);
+    }
+    });
 
         BusinessCustomer customer = new BusinessCustomer();
         customer.setOrganizationId(branch.getOrganizationId());
@@ -149,6 +168,40 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
         customer.setStatus(request.status());
         customer.setUpdatedBy(SecurityContextHelper.getCurrentUserId());
         repo.save(customer);
+        return response(customer);
+    }
+
+    @Transactional
+    public BusinessCustomerResponse transferBranch(UUID id,
+                                                   TransferBusinessCustomerBranchRequest request,
+                                                   HttpServletRequest http) {
+        if (!SecurityContextHelper.isSuperAdmin()
+                && !SecurityContextHelper.hasRole("ORGANIZATION_ADMIN")) {
+            throw new ForbiddenException("Only super admins or organization admins may transfer business customers");
+        }
+
+        BusinessCustomer customer = access(id);
+        Branch targetBranch = branch(request.targetBranchId());
+        if (targetBranch.getStatus() != BranchStatus.ACTIVE) {
+            throw new BadRequestException("Target branch must be active");
+        }
+        if (!customer.getOrganizationId().equals(targetBranch.getOrganizationId())) {
+            throw new BadRequestException("Business customer and target branch must belong to the same organization");
+        }
+        if (request.targetBranchId().equals(customer.getBranchId())) {
+            throw new BadRequestException("Business customer is already assigned to the target branch");
+        }
+        if (repo.existsByBranchIdAndCustomerCodeAndIdNot(
+                targetBranch.getId(), customer.getCustomerCode(), customer.getId())) {
+            throw new ConflictException("Customer code already exists in target branch");
+        }
+
+        UUID actorId = SecurityContextHelper.getCurrentUserId();
+        customer.setBranchId(targetBranch.getId());
+        customer.setUpdatedBy(actorId);
+        repo.save(customer);
+        locations.transferBranch(customer.getId(), targetBranch.getId());
+        users.transferBusinessCustomerUsers(customer.getId(), targetBranch.getId(), actorId);
         return response(customer);
     }
 
@@ -259,11 +312,11 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
     }
 
     private UUID currentBranchId() {
-        return users.findById(SecurityContextHelper.getCurrentUserId()).map(User::getBranchId).orElse(null);
+        return SecurityContextHelper.getCurrentBranchId();
     }
 
     private UUID currentBusinessCustomerId() {
-        return users.findById(SecurityContextHelper.getCurrentUserId()).map(User::getBusinessCustomerId).orElse(null);
+        return SecurityContextHelper.getCurrentBusinessCustomerId();
     }
 
     private BusinessCustomerResponse response(BusinessCustomer customer) {

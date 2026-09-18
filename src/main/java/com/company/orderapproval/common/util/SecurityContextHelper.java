@@ -29,6 +29,18 @@ public final class SecurityContextHelper {
         return currentUser().organizationId();
     }
 
+    public static UUID getCurrentBranchId() {
+        return currentUser().branchId();
+    }
+
+    public static UUID getCurrentBusinessCustomerId() {
+        return currentUser().businessCustomerId();
+    }
+
+    public static UUID getCurrentBusinessCustomerLocationId() {
+        return currentUser().businessCustomerLocationId();
+    }
+
     public static boolean hasPermission(String permission) {
         return currentUser().permissions().contains(permission);
     }

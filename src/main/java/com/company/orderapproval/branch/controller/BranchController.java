@@ -42,10 +42,16 @@ public class BranchController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Branch created successfully", service.create(organizationId, r, h)));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/{organizationId}")
     @PreAuthorize("hasAuthority('BRANCH_UPDATE')")
-    public ResponseEntity<ApiResponse<BranchResponse>> update(@PathVariable UUID id, @Valid @RequestBody UpdateBranchRequest r, HttpServletRequest h) {
-        return ResponseEntity.ok(ApiResponse.success("Branch updated successfully", service.update(id, r, h)));
+    public ResponseEntity<ApiResponse<Void>> update(
+            @PathVariable(required = false) UUID organizationId,
+            @RequestParam(required = false) UUID branchId,
+            @RequestParam(required = false) String branchCode,
+            @Valid @RequestBody UpdateBranchRequest r,
+            HttpServletRequest h) {
+        service.update(branchId, organizationId, branchCode, r, h);
+        return ResponseEntity.ok(ApiResponse.success("Branch updated successfully"));
     }
 
     @GetMapping("/{id}/delete-validation")

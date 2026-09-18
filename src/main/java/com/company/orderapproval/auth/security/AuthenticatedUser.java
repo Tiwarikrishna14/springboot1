@@ -12,6 +12,9 @@ import java.util.UUID;
 public record AuthenticatedUser(
         UUID userId,
         UUID organizationId,
+        UUID branchId,
+        UUID businessCustomerId,
+        UUID businessCustomerLocationId,
         String email,
         List<String> roles,
         List<String> permissions

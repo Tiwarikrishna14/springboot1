@@ -138,16 +138,20 @@ public class BranchServiceImpl implements BranchService {
   String code = r.branchCode()
           .trim()
           .toUpperCase(Locale.ROOT);
+        Optional<BranchStatus> status = repo.findStatusByOrganizationIdAndBranchCode(organizationId, code);
+  status.ifPresent(branchStatus -> {
 
-  if (repo.findByOrganizationIdAndBranchCode(
-          organizationId,
-          code
-  ).isPresent()) {
+    if (branchStatus == BranchStatus.ACTIVE) {
+        throw new ConflictException(
+                "Branch code already exists"
+        );
+    }
 
-   throw new ConflictException(
-           "Branch code already exists"
-   );
-  }
+    if (branchStatus == BranchStatus.INACTIVE) {
+        throw new ConflictException(
+                "Branch already exists but is inactive. Do you want to reactivate it?", true);
+    }
+});
 
   Branch b = new Branch();
 
@@ -171,25 +175,54 @@ public class BranchServiceImpl implements BranchService {
  }
 
  @Transactional
- public BranchResponse update(
+ public void update(
          UUID id,
+         UUID organizationId,
+         String branchCode,
          UpdateBranchRequest r,
          HttpServletRequest h
  ) {
-  Branch b = access(id);
+  if (r.name() == null && r.city() == null && r.address() == null && r.status() == null) {
+   throw new BadRequestException("Provide at least one field to update");
+  }
+  if (r.name() != null) {
+   if (r.name().isBlank()) {
+    throw new BadRequestException("Branch name cannot be blank");
+   }
+  }
+  if (organizationId == null || branchCode == null || branchCode.isBlank()) {
+   if (id == null) {
+    throw new BadRequestException("Provide branch id, or provide both organizationId and branchCode");
+   }
+  }
 
-  b.setName(r.name().trim());
-  b.setCity(r.city());
-  b.setAddress(r.address());
-  b.setStatus(r.status());
+  UUID effectiveOrganizationId = SecurityContextHelper.isSuperAdmin()
+          ? organizationId
+          : SecurityContextHelper.getCurrentOrganizationId();
+  if (!hasOrganizationWideBranchAccess()) {
+   UUID scopedBranchId = currentBranch();
+   if (scopedBranchId != null && id != null && !scopedBranchId.equals(id)) {
+    throw new ForbiddenException("Cannot update another branch");
+   }
+   if (scopedBranchId != null) {
+    id = scopedBranchId;
+   }
+  }
+  String normalizedBranchCode = branchCode == null
+          ? null
+          : branchCode.trim().toUpperCase(Locale.ROOT);
 
-  b.setUpdatedBy(
+  int updated = repo.updatePartial(
+          id,
+          effectiveOrganizationId,
+          normalizedBranchCode,
+          r,
           SecurityContextHelper.getCurrentUserId()
   );
+  if (updated == 0) {
+   throw new ResourceNotFoundException("Branch not found or cannot be updated in the current organization");
+  }
 
-  repo.save(b);
-
-  return response(b);
  }
 
  public DeleteValidationResponse validateDelete(UUID id) {

@@ -20,9 +20,15 @@ class JwtTokenServiceTest {
         ));
         UUID userId = UUID.randomUUID();
         UUID organizationId = UUID.randomUUID();
+        UUID branchId = UUID.randomUUID();
+        UUID businessCustomerId = UUID.randomUUID();
+        UUID locationId = UUID.randomUUID();
         AuthenticatedUser user = new AuthenticatedUser(
                 userId,
                 organizationId,
+                branchId,
+                businessCustomerId,
+                locationId,
                 "admin@example.com",
                 List.of("ORGANIZATION_ADMIN"),
                 List.of("USER_VIEW", "USER_CREATE")
@@ -33,6 +39,9 @@ class JwtTokenServiceTest {
 
         assertThat(parsed.userId()).isEqualTo(userId);
         assertThat(parsed.organizationId()).isEqualTo(organizationId);
+        assertThat(parsed.branchId()).isEqualTo(branchId);
+        assertThat(parsed.businessCustomerId()).isEqualTo(businessCustomerId);
+        assertThat(parsed.businessCustomerLocationId()).isEqualTo(locationId);
         assertThat(parsed.email()).isEqualTo("admin@example.com");
         assertThat(parsed.roles()).containsExactly("ORGANIZATION_ADMIN");
         assertThat(parsed.permissions()).containsExactly("USER_VIEW", "USER_CREATE");

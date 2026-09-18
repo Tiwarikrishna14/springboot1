@@ -47,6 +47,18 @@ public class BusinessCustomerController {
         return ResponseEntity.ok(ApiResponse.success("Business customer updated successfully", service.update(id, r, h)));
     }
 
+    @PatchMapping("/{id}/branch")
+    @PreAuthorize("hasAuthority('CUSTOMER_UPDATE')")
+    public ResponseEntity<ApiResponse<BusinessCustomerResponse>> transferBranch(
+            @PathVariable UUID id,
+            @Valid @RequestBody TransferBusinessCustomerBranchRequest request,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Business customer transferred successfully",
+                service.transferBranch(id, request, http)
+        ));
+    }
+
     @GetMapping("/{id}/delete-validation")
     @PreAuthorize("hasAuthority('CUSTOMER_UPDATE')")
     public ResponseEntity<ApiResponse<DeleteValidationResponse>> validateDelete(@PathVariable UUID id) {

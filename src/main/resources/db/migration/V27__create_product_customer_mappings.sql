@@ -20,7 +20,10 @@ ON CONFLICT (product_id, business_customer_id) DO NOTHING;
 -- Point historical order lines at the first master row for each NAV item code.
 WITH duplicate_lines AS (
     SELECT oi.id,
-           MIN(oi.id) OVER (PARTITION BY oi.order_id, upper(p.nav_item_code)) AS keep_id
+           first_value(oi.id) OVER (
+               PARTITION BY oi.order_id, upper(p.nav_item_code)
+               ORDER BY oi.id
+           ) AS keep_id
     FROM order_items oi
     JOIN products p ON p.id = oi.product_id
 )

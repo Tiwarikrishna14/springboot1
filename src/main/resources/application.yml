@@ -23,9 +23,16 @@ spring:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+  servlet:
+    multipart:
+      # Bulk uploads may contain one spreadsheet plus many product images.
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:500MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:1GB}
 
 server:
   port: ${SERVER_PORT:8081}
+  tomcat:
+    max-swallow-size: ${TOMCAT_MAX_SWALLOW_SIZE:1GB}
   error:
     include-message: never
     include-binding-errors: never

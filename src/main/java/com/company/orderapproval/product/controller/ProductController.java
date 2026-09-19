@@ -5,8 +5,11 @@ import com.company.orderapproval.common.response.PageResponse;
 import com.company.orderapproval.product.dto.CreateProductRequest;
 import com.company.orderapproval.product.dto.DeleteProductsRequest;
 import com.company.orderapproval.product.dto.ProductResponse;
+import com.company.orderapproval.product.dto.BulkUploadJobResponse;
+import com.company.orderapproval.product.service.BulkUploadJobService;
 import com.company.orderapproval.product.dto.UpdateProductRequest;
 import com.company.orderapproval.product.service.ProductService;
+import com.company.orderapproval.common.util.SecurityContextHelper;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +35,7 @@ import org.springframework.data.domain.Sort;
 public class ProductController {
 
     private final ProductService productService;
+    private final BulkUploadJobService bulkUploadJobService;
 
     /**
      * Create single product
@@ -127,7 +131,7 @@ public class ProductController {
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
     @PreAuthorize("hasAuthority('PRODUCT_CREATE')")
-    public ResponseEntity<ApiResponse<String>> bulkUpload(
+    public ResponseEntity<ApiResponse<BulkUploadJobResponse>> bulkUpload(
             MultipartHttpServletRequest request,
             @PathVariable String customerSellCode) {
 
@@ -135,6 +139,16 @@ public class ProductController {
         List<MultipartFile> images = new ArrayList<>(request.getFiles("images"));
         images.addAll(request.getFiles("images[]"));
 
-        return ResponseEntity.ok(ApiResponse.success("Upload successfully", productService.bulkUploadProducts(customerSellCode, file, images)));
+        BulkUploadJobResponse job = bulkUploadJobService.start(
+                customerSellCode, file, images, SecurityContextHelper.getCurrentUserId());
+        return ResponseEntity.accepted().body(ApiResponse.success(
+                "Large product upload accepted and is running in the background. Check the job status for progress and estimated time.", job));
+    }
+
+    @GetMapping("/bulk-upload/{jobId}")
+    @PreAuthorize("hasAuthority('PRODUCT_CREATE')")
+    public ResponseEntity<ApiResponse<BulkUploadJobResponse>> bulkUploadStatus(@PathVariable java.util.UUID jobId) {
+        return ResponseEntity.ok(ApiResponse.success("Bulk upload status fetched successfully",
+                bulkUploadJobService.get(jobId, SecurityContextHelper.getCurrentUserId())));
     }
 }

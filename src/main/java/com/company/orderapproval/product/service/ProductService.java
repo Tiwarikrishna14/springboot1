@@ -66,6 +66,20 @@ public class ProductService {
 
     @Transactional
     public String bulkUploadProducts(String customerSellCode, MultipartFile file, List<MultipartFile> images) {
+        return String.valueOf(processBulkUpload(customerSellCode, file, images, (total, processed) -> {}));
+    }
+
+    public int processBulkUpload(String customerSellCode, byte[] fileBytes, String fileName, String contentType,
+                                 List<BulkUploadImage> images, java.util.function.BiConsumer<Integer, Integer> progress) {
+        MultipartFile file = new ByteArrayMultipartFile("file", fileName, contentType, fileBytes);
+        List<MultipartFile> multipartImages = images.stream()
+                .map(image -> (MultipartFile) new ByteArrayMultipartFile("images", image.fileName(), image.contentType(), image.bytes()))
+                .toList();
+        return processBulkUpload(customerSellCode, file, multipartImages, progress);
+    }
+
+    private int processBulkUpload(String customerSellCode, MultipartFile file, List<MultipartFile> images,
+                                  java.util.function.BiConsumer<Integer, Integer> progress) {
         String normalizedCustomerSellCode = cleanRequired(customerSellCode, "Customer seller code");
         validateCustomer(normalizedCustomerSellCode);
 
@@ -77,6 +91,9 @@ public class ProductService {
         if (rows.isEmpty()) {
             throw new BadRequestException("Bulk upload file does not contain product rows");
         }
+        // The Excel/CSV row count is available before product validation and insertion.
+        // Publish it early so the client can render a meaningful 0% of N progress state.
+        progress.accept(rows.size(), 0);
 
         Map<String, MultipartFile> imagesByFilename = productImageStorageService.indexByOriginalFilename(images);
         Map<String, String> storedImagePaths = new HashMap<>();
@@ -110,8 +127,11 @@ public class ProductService {
             products.add(product);
         }
 
-        productRepository.saveAll(products);
-        return "Updated successfully";
+        for (int start = 0; start < products.size(); start += 100) {
+            productRepository.saveAll(products.subList(start, Math.min(start + 100, products.size())));
+            progress.accept(products.size(), Math.min(start + 100, products.size()));
+        }
+        return products.size();
     }
 
     @Transactional

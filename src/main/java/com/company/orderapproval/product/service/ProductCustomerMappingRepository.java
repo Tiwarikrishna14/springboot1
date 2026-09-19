@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
@@ -17,6 +18,9 @@ public interface ProductCustomerMappingRepository extends JpaRepository<ProductC
     Optional<ProductCustomerMapping> findByProductIdAndBusinessCustomerId(Long productId, UUID businessCustomerId);
     boolean existsByProductIdAndBusinessCustomerId(Long productId, UUID businessCustomerId);
     boolean existsByBusinessCustomerIdAndProductNavItemCodeIgnoreCase(UUID businessCustomerId, String navItemCode);
+    @Query("select upper(mapping.product.navItemCode) from ProductCustomerMapping mapping where mapping.businessCustomer.id=:customerId and upper(mapping.product.navItemCode) in :codes")
+    List<String> findMappedNavCodes(@Param("customerId") UUID customerId, @Param("codes") Collection<String> codes);
+    @EntityGraph(attributePaths = "product")
     @Query("select mapping from ProductCustomerMapping mapping where upper(mapping.businessCustomer.customerCode) = upper(:customerCode)")
     Page<ProductCustomerMapping> findByBusinessCustomerCustomerCodeIgnoreCase(@Param("customerCode") String customerCode, Pageable pageable);
 

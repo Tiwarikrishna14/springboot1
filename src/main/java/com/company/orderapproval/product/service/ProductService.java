@@ -40,6 +40,7 @@ public class ProductService {
     private final BusinessCustomerRepository businessCustomerRepository;
     private final ProductImageStorageService productImageStorageService;
     private final ObjectProvider<ProductExcelReader> productExcelReaderProvider;
+    private final ProductBulkBatchWriter bulkBatchWriter;
 
     @Transactional
     public ProductResponse createProduct(CreateProductRequest request) {
@@ -70,20 +71,21 @@ public class ProductService {
 
     @Transactional
     public String bulkUploadProducts(String customerSellCode, MultipartFile file, List<MultipartFile> images) {
-        return String.valueOf(processBulkUpload(customerSellCode, file, images, (total, processed) -> {}));
+        return String.valueOf(processBulkUpload(customerSellCode, file, images, 0, (total, processed) -> {}));
     }
 
     public int processBulkUpload(String customerSellCode, byte[] fileBytes, String fileName, String contentType,
-                                 List<BulkUploadImage> images, java.util.function.BiConsumer<Integer, Integer> progress) {
+                                 List<BulkUploadImage> images, int startIndex,
+                                 java.util.function.BiConsumer<Integer, Integer> progress) {
         MultipartFile file = new ByteArrayMultipartFile("file", fileName, contentType, fileBytes);
         List<MultipartFile> multipartImages = images.stream()
                 .map(image -> (MultipartFile) new ByteArrayMultipartFile("images", image.fileName(), image.contentType(), image.bytes()))
                 .toList();
-        return processBulkUpload(customerSellCode, file, multipartImages, progress);
+        return processBulkUpload(customerSellCode, file, multipartImages, startIndex, progress);
     }
 
     private int processBulkUpload(String customerSellCode, MultipartFile file, List<MultipartFile> images,
-                                  java.util.function.BiConsumer<Integer, Integer> progress) {
+                                  int startIndex, java.util.function.BiConsumer<Integer, Integer> progress) {
         String normalizedCustomerSellCode = cleanRequired(customerSellCode, "Customer seller code");
         BusinessCustomer customer = customer(normalizedCustomerSellCode);
 
@@ -97,43 +99,64 @@ public class ProductService {
         }
         // The Excel/CSV row count is available before product validation and insertion.
         // Publish it early so the client can render a meaningful 0% of N progress state.
-        progress.accept(rows.size(), 0);
+        int safeStartIndex = Math.max(0, Math.min(startIndex, rows.size()));
+        progress.accept(rows.size(), safeStartIndex);
 
         Map<String, MultipartFile> imagesByFilename = productImageStorageService.indexByOriginalFilename(images);
         Map<String, String> storedImagePaths = new HashMap<>();
         Set<String> uploadedProductKeys = new HashSet<>();
-        List<ProductCustomerMapping> mappings = new ArrayList<>();
+        for (int index = 0; index < safeStartIndex; index++) {
+            String code = cleanOptional(rows.get(index).navItemCode());
+            if (code != null) uploadedProductKeys.add(code.toUpperCase(Locale.ROOT));
+        }
+        List<PreparedBulkProduct> batch = new ArrayList<>(100);
+        int committed = safeStartIndex;
 
-        for (BulkProductRow row : rows) {
-            String category = cleanRequired(row.category(), "Category", row.rowNumber());
-            String navItemCode = cleanRequired(row.navItemCode(), "NAV item code", row.rowNumber());
-            String itemDescription = cleanRequired(row.itemDescription(), "Item description", row.rowNumber());
-            String uom = cleanRequired(row.uom(), "UOM", row.rowNumber());
-            BigDecimal unitRate = parseUnitRate(row.unitRateValue(), row.rowNumber());
-
-            String productKey = navItemCode.toUpperCase(Locale.ROOT);
-            if (!uploadedProductKeys.add(productKey)) {
-                throw new BadRequestException("Duplicate NAV item code in bulk upload at row " + row.rowNumber());
+        for (int index = safeStartIndex; index < rows.size(); index++) {
+            BulkProductRow row = rows.get(index);
+            try {
+                String category = cleanRequired(row.category(), "Category", row.rowNumber());
+                String navItemCode = cleanRequired(row.navItemCode(), "NAV item code", row.rowNumber());
+                String itemDescription = cleanRequired(row.itemDescription(), "Item description", row.rowNumber());
+                String uom = cleanRequired(row.uom(), "UOM", row.rowNumber());
+                BigDecimal unitRate = parseUnitRate(row.unitRateValue(), row.rowNumber());
+                if (!uploadedProductKeys.add(navItemCode.toUpperCase(Locale.ROOT))) {
+                    throw new BadRequestException("Duplicate NAV item code in bulk upload at row " + row.rowNumber());
+                }
+                batch.add(new PreparedBulkProduct(category, navItemCode, itemDescription, uom, unitRate,
+                        resolveBulkImagePath(row, imagesByFilename, storedImagePaths), row.rowNumber()));
+            } catch (RuntimeException ex) {
+                committed = commitBatchWithFailureIsolation(customer, batch, committed, rows.size(), progress);
+                throw ex;
             }
-            ensureMappingDoesNotExist(customer.getId(), normalizedCustomerSellCode, navItemCode, row.rowNumber());
-            Product product = productRepository.findByNavItemCodeIgnoreCase(navItemCode).orElseGet(() ->
-                    productRepository.save(Product.builder()
-                            .category(category)
-                            .navItemCode(navItemCode)
-                            .itemDescription(itemDescription)
-                            .uom(uom)
-                            .unitRate(unitRate)
-                            .imagePath(resolveBulkImagePath(row, imagesByFilename, storedImagePaths))
-                            .status("ACTIVE")
-                            .build()));
-            mappings.add(mapping(customer, product, itemDescription, "ACTIVE"));
+            if (batch.size() == 100) {
+                committed = commitBatchWithFailureIsolation(customer, batch, committed, rows.size(), progress);
+            }
         }
+        commitBatchWithFailureIsolation(customer, batch, committed, rows.size(), progress);
+        return rows.size();
+    }
 
-        for (int start = 0; start < mappings.size(); start += 100) {
-            mappingRepository.saveAll(mappings.subList(start, Math.min(start + 100, mappings.size())));
-            progress.accept(mappings.size(), Math.min(start + 100, mappings.size()));
+    private int commitBatchWithFailureIsolation(BusinessCustomer customer,
+                                                List<PreparedBulkProduct> batch,
+                                                int committed,
+                                                int total,
+                                                java.util.function.BiConsumer<Integer, Integer> progress) {
+        if (batch.isEmpty()) return committed;
+        try {
+            bulkBatchWriter.write(customer, List.copyOf(batch));
+            committed += batch.size();
+            progress.accept(total, committed);
+        } catch (RuntimeException batchFailure) {
+            for (PreparedBulkProduct row : batch) {
+                bulkBatchWriter.write(customer, List.of(row));
+                committed++;
+                progress.accept(total, committed);
+            }
+        } finally {
+            batch.clear();
         }
-        return mappings.size();
+        return committed;
     }
 
     @Transactional

@@ -133,14 +133,15 @@ public class ProductController {
     @PreAuthorize("hasAuthority('PRODUCT_CREATE')")
     public ResponseEntity<ApiResponse<BulkUploadJobResponse>> bulkUpload(
             MultipartHttpServletRequest request,
-            @PathVariable String customerSellCode) {
+            @PathVariable String customerSellCode,
+            @RequestParam(required = false) java.util.UUID resumeToken) {
 
         MultipartFile file = request.getFile("file");
         List<MultipartFile> images = new ArrayList<>(request.getFiles("images"));
         images.addAll(request.getFiles("images[]"));
 
         BulkUploadJobResponse job = bulkUploadJobService.start(
-                customerSellCode, file, images, SecurityContextHelper.getCurrentUserId());
+                customerSellCode, file, images, SecurityContextHelper.getCurrentUserId(), resumeToken);
         return ResponseEntity.accepted().body(ApiResponse.success(
                 "Large product upload accepted and is running in the background. Check the job status for progress and estimated time.", job));
     }

@@ -19,4 +19,12 @@ public final class HashUtil {
             throw new IllegalStateException("SHA-256 is unavailable", ex);
         }
     }
+
+    public static String sha256(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
+    }
 }

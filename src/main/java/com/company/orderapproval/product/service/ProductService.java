@@ -3,10 +3,12 @@ package com.company.orderapproval.product.service;
 import com.company.orderapproval.common.exception.BadRequestException;
 import com.company.orderapproval.common.exception.ResourceNotFoundException;
 import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
+import com.company.orderapproval.customer.entity.BusinessCustomer;
 import com.company.orderapproval.product.dto.CreateProductRequest;
 import com.company.orderapproval.product.dto.ProductResponse;
 import com.company.orderapproval.product.dto.UpdateProductRequest;
 import com.company.orderapproval.product.entity.Product;
+import com.company.orderapproval.product.entity.ProductCustomerMapping;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -27,12 +29,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final ProductCustomerMappingRepository mappingRepository;
     private final BusinessCustomerRepository businessCustomerRepository;
     private final ProductImageStorageService productImageStorageService;
     private final ObjectProvider<ProductExcelReader> productExcelReaderProvider;
@@ -47,21 +51,21 @@ public class ProductService {
         String customerSellCode = cleanRequired(request.customerSellCode(), "Customer seller code");
         String navItemCode = cleanRequired(request.navItemCode(), "NAV item code");
 
-        validateCustomer(customerSellCode);
-        ensureProductDoesNotExist(customerSellCode, navItemCode, null);
+        BusinessCustomer customer = customer(customerSellCode);
+        ensureMappingDoesNotExist(customer.getId(), customerSellCode, navItemCode, null);
+        Product product = productRepository.findByNavItemCodeIgnoreCase(navItemCode)
+                .orElseGet(() -> productRepository.save(Product.builder()
+                        .category(cleanRequired(request.category(), "Category"))
+                        .navItemCode(navItemCode)
+                        .itemDescription(cleanRequired(request.itemDescription(), "Item description"))
+                        .uom(cleanRequired(request.uom(), "UOM"))
+                        .unitRate(request.unitRate())
+                        .imagePath(productImageStorageService.store(image))
+                        .status("ACTIVE")
+                        .build()));
 
-        Product product = Product.builder()
-                .category(cleanRequired(request.category(), "Category"))
-                .customerSellCode(customerSellCode)
-                .navItemCode(navItemCode)
-                .itemDescription(cleanRequired(request.itemDescription(), "Item description"))
-                .uom(cleanRequired(request.uom(), "UOM"))
-                .unitRate(request.unitRate())
-                .imagePath(productImageStorageService.store(image))
-                .status("ACTIVE")
-                .build();
-
-        return toResponse(productRepository.save(product));
+        ProductCustomerMapping mapping = mapping(customer, product, cleanRequired(request.itemDescription(), "Item description"), "ACTIVE");
+        return toResponse(mappingRepository.save(mapping), customerSellCode);
     }
 
     @Transactional
@@ -81,7 +85,7 @@ public class ProductService {
     private int processBulkUpload(String customerSellCode, MultipartFile file, List<MultipartFile> images,
                                   java.util.function.BiConsumer<Integer, Integer> progress) {
         String normalizedCustomerSellCode = cleanRequired(customerSellCode, "Customer seller code");
-        validateCustomer(normalizedCustomerSellCode);
+        BusinessCustomer customer = customer(normalizedCustomerSellCode);
 
         if (file == null || file.isEmpty()) {
             throw new BadRequestException("CSV or Excel file is mandatory");
@@ -98,7 +102,7 @@ public class ProductService {
         Map<String, MultipartFile> imagesByFilename = productImageStorageService.indexByOriginalFilename(images);
         Map<String, String> storedImagePaths = new HashMap<>();
         Set<String> uploadedProductKeys = new HashSet<>();
-        List<Product> products = new ArrayList<>();
+        List<ProductCustomerMapping> mappings = new ArrayList<>();
 
         for (BulkProductRow row : rows) {
             String category = cleanRequired(row.category(), "Category", row.rowNumber());
@@ -107,31 +111,29 @@ public class ProductService {
             String uom = cleanRequired(row.uom(), "UOM", row.rowNumber());
             BigDecimal unitRate = parseUnitRate(row.unitRateValue(), row.rowNumber());
 
-            String productKey = normalizedCustomerSellCode + "|" + navItemCode.toUpperCase(Locale.ROOT);
+            String productKey = navItemCode.toUpperCase(Locale.ROOT);
             if (!uploadedProductKeys.add(productKey)) {
                 throw new BadRequestException("Duplicate NAV item code in bulk upload at row " + row.rowNumber());
             }
-            ensureProductDoesNotExist(normalizedCustomerSellCode, navItemCode, row.rowNumber());
-
-            Product product = Product.builder()
-                    .category(category)
-                    .customerSellCode(normalizedCustomerSellCode)
-                    .navItemCode(navItemCode)
-                    .itemDescription(itemDescription)
-                    .uom(uom)
-                    .unitRate(unitRate)
-                    .imagePath(resolveBulkImagePath(row, imagesByFilename, storedImagePaths))
-                    .status("ACTIVE")
-                    .build();
-
-            products.add(product);
+            ensureMappingDoesNotExist(customer.getId(), normalizedCustomerSellCode, navItemCode, row.rowNumber());
+            Product product = productRepository.findByNavItemCodeIgnoreCase(navItemCode).orElseGet(() ->
+                    productRepository.save(Product.builder()
+                            .category(category)
+                            .navItemCode(navItemCode)
+                            .itemDescription(itemDescription)
+                            .uom(uom)
+                            .unitRate(unitRate)
+                            .imagePath(resolveBulkImagePath(row, imagesByFilename, storedImagePaths))
+                            .status("ACTIVE")
+                            .build()));
+            mappings.add(mapping(customer, product, itemDescription, "ACTIVE"));
         }
 
-        for (int start = 0; start < products.size(); start += 100) {
-            productRepository.saveAll(products.subList(start, Math.min(start + 100, products.size())));
-            progress.accept(products.size(), Math.min(start + 100, products.size()));
+        for (int start = 0; start < mappings.size(); start += 100) {
+            mappingRepository.saveAll(mappings.subList(start, Math.min(start + 100, mappings.size())));
+            progress.accept(mappings.size(), Math.min(start + 100, mappings.size()));
         }
-        return products.size();
+        return mappings.size();
     }
 
     @Transactional
@@ -145,33 +147,37 @@ public class ProductService {
         String customerSellCode = cleanRequired(request.customerSellCode(), "Customer seller code");
         String navItemCode = cleanRequired(request.navItemCode(), "NAV item code");
 
-        validateCustomer(customerSellCode);
-        ensureProductDoesNotExistForUpdate(customerSellCode, navItemCode, id);
+        BusinessCustomer customer = customer(customerSellCode);
+        ProductCustomerMapping mapping = mappingRepository.findByProductIdAndBusinessCustomerId(id, customer.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Product is not mapped to this customer"));
+        Product existingMaster = productRepository.findByNavItemCodeIgnoreCase(navItemCode).orElse(product);
 
-        String oldImagePath = product.getImagePath();
+        String oldImagePath = existingMaster.getImagePath();
         String newImagePath = oldImagePath;
-        String storedImagePath = productImageStorageService.store(image);
+        String storedImagePath = product == existingMaster ? productImageStorageService.store(image) : null;
         if (storedImagePath != null) {
             newImagePath = storedImagePath;
         } else if (Boolean.TRUE.equals(request.removeImage())) {
             newImagePath = null;
         }
 
-        product.setCategory(cleanRequired(request.category(), "Category"));
-        product.setCustomerSellCode(customerSellCode);
-        product.setNavItemCode(navItemCode);
-        product.setItemDescription(cleanRequired(request.itemDescription(), "Item description"));
-        product.setUom(cleanRequired(request.uom(), "UOM"));
-        product.setUnitRate(request.unitRate());
-        product.setStatus(cleanRequired(request.status(), "Status").toUpperCase(Locale.ROOT));
-        product.setImagePath(newImagePath);
+        existingMaster.setCategory(cleanRequired(request.category(), "Category"));
+        existingMaster.setNavItemCode(navItemCode);
+        existingMaster.setItemDescription(cleanRequired(request.itemDescription(), "Item description"));
+        existingMaster.setUom(cleanRequired(request.uom(), "UOM"));
+        existingMaster.setUnitRate(request.unitRate());
+        existingMaster.setImagePath(newImagePath);
+        mapping.setProduct(existingMaster);
+        mapping.setProductName(cleanRequired(request.itemDescription(), "Item description"));
+        mapping.setStatus(cleanRequired(request.status(), "Status").toUpperCase(Locale.ROOT));
 
-        Product savedProduct = productRepository.save(product);
+        productRepository.save(existingMaster);
+        mappingRepository.save(mapping);
         if (oldImagePath != null && !oldImagePath.equals(newImagePath)) {
             productImageStorageService.delete(oldImagePath);
         }
 
-        return toResponse(savedProduct);
+        return toResponse(mapping, customerSellCode);
     }
 
     @Transactional
@@ -191,6 +197,7 @@ public class ProductService {
             throw new ResourceNotFoundException("Products not found: " + missingIds);
         }
 
+        mappingRepository.deleteByProductIds(productIds);
         productRepository.deleteAll(products);
         for (Product product : products) {
             productImageStorageService.delete(product.getImagePath());
@@ -200,28 +207,28 @@ public class ProductService {
     }
 
     public Page<ProductResponse> getProducts(String customerCode, Pageable pageable) {
-        Page<Product> products = productRepository.findByCustomerSellCode(customerCode, pageable);
-        return products.map(this::toResponse);
+        Page<ProductCustomerMapping> mappings = mappingRepository.findByBusinessCustomerCustomerCodeIgnoreCase(customerCode, pageable);
+        return mappings.map(mapping -> toResponse(mapping, customerCode));
     }
 
-    private ProductResponse toResponse(Product product) {
+    private ProductResponse toResponse(ProductCustomerMapping mapping, String customerCode) {
+        Product product = mapping.getProduct();
         return new ProductResponse(
                 product.getId(),
                 product.getCategory(),
-                product.getCustomerSellCode(),
+                customerCode,
                 product.getNavItemCode(),
-                product.getItemDescription(),
+                mapping.getProductName(),
                 product.getUom(),
                 product.getUnitRate(),
                 product.getImagePath(),
-                product.getStatus()
+                mapping.getStatus()
         );
     }
 
-    private void validateCustomer(String customerSellCode) {
-        if (!businessCustomerRepository.existsByCustomerCode(customerSellCode)) {
-            throw new BadRequestException("Invalid customer seller code: " + customerSellCode);
-        }
+    private BusinessCustomer customer(String customerSellCode) {
+        return businessCustomerRepository.findByCustomerCodeIgnoreCase(customerSellCode)
+                .orElseThrow(() -> new BadRequestException("Invalid customer seller code: " + customerSellCode));
     }
 
     private Product findProduct(Long id) {
@@ -232,11 +239,11 @@ public class ProductService {
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
     }
 
-    private void ensureProductDoesNotExist(String customerSellCode, String navItemCode, Integer rowNumber) {
-        boolean duplicate = productRepository.existsByCustomerSellCodeAndNavItemCode(customerSellCode, navItemCode);
+    private void ensureMappingDoesNotExist(UUID customerId, String customerCode, String navItemCode, Integer rowNumber) {
+        boolean duplicate = mappingRepository.existsByBusinessCustomerIdAndProductNavItemCodeIgnoreCase(customerId, navItemCode);
         if (duplicate) {
             String message = "Product already exists for customer seller code "
-                    + customerSellCode
+                    + customerCode
                     + " and NAV item code "
                     + navItemCode;
             if (rowNumber != null) {
@@ -246,20 +253,8 @@ public class ProductService {
         }
     }
 
-    private void ensureProductDoesNotExistForUpdate(String customerSellCode, String navItemCode, Long productId) {
-        boolean duplicate = productRepository.existsByCustomerSellCodeAndNavItemCodeAndIdNot(
-                customerSellCode,
-                navItemCode,
-                productId
-        );
-        if (duplicate) {
-            throw new BadRequestException(
-                    "Product already exists for customer seller code "
-                            + customerSellCode
-                            + " and NAV item code "
-                            + navItemCode
-            );
-        }
+    private ProductCustomerMapping mapping(BusinessCustomer customer, Product product, String productName, String status) {
+        return ProductCustomerMapping.builder().businessCustomer(customer).product(product).productName(productName).status(status).build();
     }
 
     private String resolveBulkImagePath(

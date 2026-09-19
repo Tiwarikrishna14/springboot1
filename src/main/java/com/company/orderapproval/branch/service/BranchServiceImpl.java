@@ -11,7 +11,7 @@ import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
 import com.company.orderapproval.order.entity.OrderStatus;
 import com.company.orderapproval.order.repository.OrderRepository;
 import com.company.orderapproval.organization.repository.OrganizationRepository;
-import com.company.orderapproval.product.service.ProductRepository;
+import com.company.orderapproval.product.service.ProductCustomerMappingRepository;
 import com.company.orderapproval.user.entity.User;
 import com.company.orderapproval.user.repository.UserRepository;
 
@@ -41,7 +41,7 @@ public class BranchServiceImpl implements BranchService {
  private final AuditService audit;
  private final UserRepository users;
  private final BusinessCustomerRepository customers;
- private final ProductRepository products;
+ private final ProductCustomerMappingRepository products;
  private final OrderRepository orders;
 
  public BranchServiceImpl(
@@ -50,7 +50,7 @@ public class BranchServiceImpl implements BranchService {
          AuditService audit,
          UserRepository users,
          BusinessCustomerRepository customers,
-         ProductRepository products,
+         ProductCustomerMappingRepository products,
          OrderRepository orders
  ) {
   this.repo = repo;
@@ -303,7 +303,7 @@ public class BranchServiceImpl implements BranchService {
   List<String> customerCodes = customers.findCustomerCodesByBranchId(branchId);
   long productCount = customerCodes.isEmpty()
           ? 0
-          : products.countByCustomerSellCodeIn(customerCodes);
+          : products.countByBusinessCustomerCustomerCodeIn(customerCodes);
 
   Map<String, Long> counts = new LinkedHashMap<>();
   counts.put("users", users.countByBranchId(branchId));

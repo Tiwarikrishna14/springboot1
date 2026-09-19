@@ -1,6 +1,5 @@
 package com.company.orderapproval.auth.service;
 
-public interface EmailService {
-    /** Publishes a password-reset request for asynchronous delivery. */
+public interface EmailDeliveryService {
     void sendPasswordResetEmail(String email, String resetLink);
 }

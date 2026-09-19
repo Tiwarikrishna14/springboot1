@@ -19,7 +19,7 @@ import com.company.orderapproval.customer.entity.BusinessCustomerStatus;
 import com.company.orderapproval.customer.repository.BusinessCustomerRepository;
 import com.company.orderapproval.order.entity.OrderStatus;
 import com.company.orderapproval.order.repository.OrderRepository;
-import com.company.orderapproval.product.service.ProductRepository;
+import com.company.orderapproval.product.service.ProductCustomerMappingRepository;
 import com.company.orderapproval.user.entity.User;
 import com.company.orderapproval.user.repository.UserRepository;
 
@@ -58,14 +58,14 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
     private final BranchRepository branches;
     private final UserRepository users;
     private final OrderRepository orders;
-    private final ProductRepository products;
+    private final ProductCustomerMappingRepository products;
     private final BusinessCustomerLocationRepository locations;
 
     public BusinessCustomerServiceImpl(BusinessCustomerRepository repo,
                                        BranchRepository branches,
                                        UserRepository users,
                                        OrderRepository orders,
-                                       ProductRepository products,
+                                       ProductCustomerMappingRepository products,
                                        BusinessCustomerLocationRepository locations) {
         this.repo = repo;
         this.branches = branches;
@@ -246,7 +246,7 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
     private Map<String, Long> customerDeleteCounts(BusinessCustomer customer) {
         Map<String, Long> counts = new LinkedHashMap<>();
         counts.put("users", users.countByBusinessCustomerId(customer.getId()));
-        counts.put("products", products.countByCustomerSellCodeIn(List.of(customer.getCustomerCode())));
+        counts.put("products", products.countByBusinessCustomerCustomerCodeIn(List.of(customer.getCustomerCode())));
         counts.put("notDeliveredOrders", orders.countByBusinessCustomerIdAndStatusIn(
                 customer.getId(),
                 NOT_DELIVERED_ORDER_STATUSES

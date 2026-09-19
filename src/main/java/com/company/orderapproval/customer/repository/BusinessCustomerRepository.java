@@ -4,6 +4,7 @@ public interface BusinessCustomerRepository extends JpaRepository<BusinessCustom
 
  Optional<BusinessCustomer> findByBranchIdAndCustomerCode(UUID branchId,String code);
  Optional<BusinessCustomerStatus> findStatusByBranchIdAndCustomerCode(UUID branchId,String code);
+ Optional<BusinessCustomer> findByCustomerCodeIgnoreCase(String customerCode);
  boolean existsByBranchIdAndCustomerCodeAndIdNot(UUID branchId,String code,UUID id);
  long countByBranchId(UUID branchId);
  long countByOrganizationId(UUID organizationId);

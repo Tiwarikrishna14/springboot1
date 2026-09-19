@@ -20,7 +20,7 @@ import com.company.orderapproval.organization.entity.Organization;
 import com.company.orderapproval.organization.entity.OrganizationStatus;
 import com.company.orderapproval.organization.mapper.OrganizationMapper;
 import com.company.orderapproval.organization.repository.OrganizationRepository;
-import com.company.orderapproval.product.service.ProductRepository;
+import com.company.orderapproval.product.service.ProductCustomerMappingRepository;
 import com.company.orderapproval.user.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.data.domain.Page;
@@ -55,7 +55,7 @@ public class OrganizationServiceImpl implements OrganizationService {
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
     private final BusinessCustomerRepository businessCustomerRepository;
-    private final ProductRepository productRepository;
+    private final ProductCustomerMappingRepository productRepository;
     private final OrderRepository orderRepository;
 
     public OrganizationServiceImpl(OrganizationRepository organizationRepository,
@@ -64,7 +64,7 @@ public class OrganizationServiceImpl implements OrganizationService {
                                    UserRepository userRepository,
                                    BranchRepository branchRepository,
                                    BusinessCustomerRepository businessCustomerRepository,
-                                   ProductRepository productRepository,
+                                   ProductCustomerMappingRepository productRepository,
                                    OrderRepository orderRepository) {
         this.organizationRepository = organizationRepository;
         this.organizationMapper = organizationMapper;
@@ -220,7 +220,7 @@ public class OrganizationServiceImpl implements OrganizationService {
         List<String> customerCodes = businessCustomerRepository.findCustomerCodesByOrganizationId(organizationId);
         long productCount = customerCodes.isEmpty()
                 ? 0
-                : productRepository.countByCustomerSellCodeIn(customerCodes);
+                : productRepository.countByBusinessCustomerCustomerCodeIn(customerCodes);
 
         Map<String, Long> counts = new LinkedHashMap<>();
         counts.put("users", userRepository.countByOrganizationId(organizationId));

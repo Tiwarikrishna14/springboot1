@@ -39,6 +39,8 @@ import com.company.orderapproval.organization.entity.OrganizationType;
 import com.company.orderapproval.organization.repository.OrganizationRepository;
 import com.company.orderapproval.product.entity.Product;
 import com.company.orderapproval.product.service.ProductRepository;
+import com.company.orderapproval.product.service.ProductCustomerMappingRepository;
+import com.company.orderapproval.product.entity.ProductCustomerMapping;
 import com.company.orderapproval.policy.dto.*;
 import com.company.orderapproval.policy.service.ApprovalPolicyService;
 import com.company.orderapproval.user.entity.User;
@@ -103,6 +105,7 @@ public class OrderService {
     private final BusinessCustomerRepository businessCustomerRepository;
     private final BusinessCustomerLocationRepository businessCustomerLocationRepository;
     private final ProductRepository productRepository;
+    private final ProductCustomerMappingRepository productCustomerMappingRepository;
     private final OrganizationRepository organizationRepository;
     private final AuditService auditService;
     private final ApplicationEventPublisher eventPublisher;
@@ -336,16 +339,21 @@ public class OrderService {
             throw new ValidationException("Invalid products", Map.of("productIds", missingProductIds.toString()));
         }
 
-        List<Long> invalidCustomerProducts = productsById.values().stream()
-                .filter(product -> !customer.getCustomerCode().equalsIgnoreCase(product.getCustomerSellCode()))
-                .map(Product::getId)
+        Map<Long, ProductCustomerMapping> mappingsByProductId = productCustomerMappingRepository
+                .findByProductIdIn(requestedProductIds)
+                .stream()
+                .filter(mapping -> mapping.getBusinessCustomer().getId().equals(customer.getId()))
+                .collect(Collectors.toMap(mapping -> mapping.getProduct().getId(), Function.identity()));
+        List<Long> invalidCustomerProducts = requestedProductIds.stream()
+                .filter(productId -> !mappingsByProductId.containsKey(productId))
                 .toList();
         if (!invalidCustomerProducts.isEmpty()) {
             throw new ValidationException("Invalid products", Map.of("productIds", invalidCustomerProducts + " do not belong to customer " + customer.getCustomerCode()));
         }
 
         List<Long> inactiveProductIds = productsById.values().stream()
-                .filter(product -> !"ACTIVE".equalsIgnoreCase(product.getStatus()))
+                .filter(product -> !"ACTIVE".equalsIgnoreCase(product.getStatus())
+                        || !"ACTIVE".equalsIgnoreCase(mappingsByProductId.get(product.getId()).getStatus()))
                 .map(Product::getId)
                 .toList();
         if (!inactiveProductIds.isEmpty()) {
@@ -366,11 +374,11 @@ public class OrderService {
                 item.setProductId(product.getId());
                 order.getItems().add(item);
             }
-            applyItemValues(item, itemRequest, product);
+            applyItemValues(item, itemRequest, product, mappingsByProductId.get(product.getId()).getProductName());
         }
     }
 
-    private void applyItemValues(OrderItem item, OrderItemRequest request, Product product) {
+    private void applyItemValues(OrderItem item, OrderItemRequest request, Product product, String productName) {
         if (request.quantity() == null || request.quantity().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Quantity must be greater than 0");
         }
@@ -379,7 +387,7 @@ public class OrderService {
         }
 
         item.setProductCode(product.getNavItemCode());
-        item.setProductDescription(product.getItemDescription());
+        item.setProductDescription(productName);
         item.setQuantity(request.quantity());
         item.setUnitPrice(request.unitPrice());
         item.setLineRemark(cleanOptional(request.remark()));

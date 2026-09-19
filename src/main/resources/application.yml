@@ -7,6 +7,12 @@ spring:
     url: jdbc:postgresql://aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres?user=postgres.bunoceaaawmrgpnokwul&password=Admin@123#123
     username: postgres
     password: Admin@123#123
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
   jpa:
     hibernate:
       ddl-auto: validate

@@ -1,50 +1,39 @@
 package com.company.orderapproval.product.entity;
 
+import com.company.orderapproval.customer.entity.BusinessCustomer;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
-@Table(name = "products")
+@Table(name = "product_customer_mappings",
+        uniqueConstraints = @UniqueConstraint(name = "ux_product_customer_mapping", columnNames = {"product_id", "business_customer_id"}))
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Product {
+public class ProductCustomerMapping {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "category", nullable = false, length = 100)
-    private String category;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "product_id", nullable = false)
+    private Product product;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "business_customer_id", nullable = false)
+    private BusinessCustomer businessCustomer;
+
+    @Column(name = "product_name", nullable = false, length = 500)
+    private String productName;
 
     @Builder.Default
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
-
-    @Column(name = "nav_item_code", nullable = false, length = 100, unique = true)
-    private String navItemCode;
-
-    @Column(name = "item_description", nullable = false, length = 500)
-    private String itemDescription;
-
-    @Column(name = "uom", nullable = false, length = 20)
-    private String uom;
-
-    @Column(
-            name = "unit_rate",
-            nullable = false,
-            precision = 17,
-            scale = 2
-    )
-    private BigDecimal unitRate;
-
-    @Column(name = "image_path", length = 500)
-    private String imagePath;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @Profile("dev")
-public class DevelopmentEmailService implements EmailService {
+public class DevelopmentEmailService implements EmailDeliveryService {
 
     private static final Logger log = LoggerFactory.getLogger(DevelopmentEmailService.class);
 

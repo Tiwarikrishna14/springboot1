@@ -22,6 +22,7 @@ import com.company.orderapproval.order.repository.OrderRepository;
 import com.company.orderapproval.product.service.ProductRepository;
 import com.company.orderapproval.user.entity.User;
 import com.company.orderapproval.user.repository.UserRepository;
+
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.data.domain.Page;
@@ -31,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -86,7 +88,7 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
         UUID org = SecurityContextHelper.isSuperAdmin() ? organizationId : SecurityContextHelper.getCurrentOrganizationId();
         UUID scopedBranch = branchId;
 
-        if (!SecurityContextHelper.isSuperAdmin()) {
+        if (!SecurityContextHelper.isSuperAdmin() && !SecurityContextHelper.isOrganizationAdmin()) {
             UUID currentBranch = currentBranchId();
             if (currentBranch != null) {
                 scopedBranch = currentBranch;
@@ -95,11 +97,11 @@ public class BusinessCustomerServiceImpl implements BusinessCustomerService {
             if (customerId != null) {
                 return repo.findById(customerId)
                         .filter(customer -> customer.getStatus() == effectiveStatus)
-                        .filter(customer -> search == null
-                                || search.isBlank()
-                                || customer.getName().toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT)))
+                        // .filter(customer -> search == null
+                        //         || search.isBlank()
+                        //         || customer.getName().toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT)))
                         .map(customer -> new PageImpl<BusinessCustomer>(List.of(customer), p, 1))
-                        .orElse(new PageImpl<>(List.of(), p, 0))
+                        .orElse(new PageImpl<>(Collections.emptyList(), p, 0))
                         .map(this::response);
             }
         }

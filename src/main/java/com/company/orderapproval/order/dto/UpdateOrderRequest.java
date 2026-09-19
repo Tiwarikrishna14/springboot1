@@ -30,6 +30,9 @@ public record UpdateOrderRequest(
         @Valid
         List<OrderItemRequest> products,
 
-        List<UUID> approverIds
+        List<UUID> approverIds,
+
+        @Valid
+        List<OrderApproverRequest> approvers
 ) {
 }

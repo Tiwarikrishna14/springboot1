@@ -16,6 +16,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.UuidGenerator;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+import com.company.orderapproval.policy.dto.OrderApprovalPolicyConfig;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -77,6 +80,10 @@ public class Order {
 
     @Column(name = "expected_delivery_date")
     private LocalDate expectedDeliveryDate;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "approval_policy_snapshot", columnDefinition = "jsonb")
+    private OrderApprovalPolicyConfig approvalPolicySnapshot;
 
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;

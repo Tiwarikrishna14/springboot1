@@ -39,6 +39,9 @@ public class OrderApprover {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    @Column(name = "approval_level", nullable = false)
+    private int approvalLevel = 1;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "approval_status", nullable = false, length = 32)
     private ApprovalStatus approvalStatus = ApprovalStatus.PENDING;

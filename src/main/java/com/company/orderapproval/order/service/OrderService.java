@@ -17,6 +17,7 @@ import com.company.orderapproval.order.dto.ApprovalAction;
 import com.company.orderapproval.order.dto.ApprovalActionRequest;
 import com.company.orderapproval.order.dto.CreateOrderRequest;
 import com.company.orderapproval.order.dto.OrderApproverResponse;
+import com.company.orderapproval.order.dto.OrderApproverRequest;
 import com.company.orderapproval.order.dto.OrderItemRequest;
 import com.company.orderapproval.order.dto.OrderItemResponse;
 import com.company.orderapproval.order.dto.OrderLocationResponse;
@@ -38,6 +39,8 @@ import com.company.orderapproval.organization.entity.OrganizationType;
 import com.company.orderapproval.organization.repository.OrganizationRepository;
 import com.company.orderapproval.product.entity.Product;
 import com.company.orderapproval.product.service.ProductRepository;
+import com.company.orderapproval.policy.dto.*;
+import com.company.orderapproval.policy.service.ApprovalPolicyService;
 import com.company.orderapproval.user.entity.User;
 import com.company.orderapproval.user.entity.UserStatus;
 import com.company.orderapproval.user.repository.UserRepository;
@@ -103,6 +106,7 @@ public class OrderService {
     private final OrganizationRepository organizationRepository;
     private final AuditService auditService;
     private final ApplicationEventPublisher eventPublisher;
+    private final ApprovalPolicyService approvalPolicyService;
 
     @Transactional
     public OrderResponse create(CreateOrderRequest request, HttpServletRequest servletRequest) {
@@ -117,12 +121,15 @@ public class OrderService {
         order.setBusinessCustomerLocationId(creator.getBusinessCustomerLocationId());
         order.setBusinessCustomerCode(customer.getCustomerCode());
         order.setBusinessCustomerName(customer.getName());
+        OrderApprovalPolicyConfig approvalPolicy = approvalPolicyService.resolveOrderPolicy(customer.getId());
+        order.setApprovalPolicySnapshot(approvalPolicy);
         order.setCreatedBy(creator.getId());
         applyFields(order, request.notes(), request.remarks(), request.priority(), request.location(), request.referenceNumber());
         applyOrderLocation(order, creator, customer, request.businessCustomerLocationId(), request.locationCode(), request.location(), true);
 
         syncItems(order, request.products(), customer);
-        syncApprovers(order, request.approverIds(), customer.getId());
+        syncApprovers(order, requestedApprovers(request.approvers(), request.approverIds()),
+                customer.getId(), creator.getId(), approvalPolicy);
         order.setStatus(orderIsComplete(order) ? OrderStatus.CREATED : OrderStatus.DRAFT);
 
         Order saved = orderRepository.save(order);
@@ -145,7 +152,9 @@ public class OrderService {
         applyFields(order, request.notes(), request.remarks(), request.priority(), request.location(), request.referenceNumber());
         applyOrderLocation(order, actor, customer, request.businessCustomerLocationId(), request.locationCode(), request.location(), false);
         syncItems(order, request.products(), customer);
-        syncApprovers(order, request.approverIds(), customer.getId());
+        OrderApprovalPolicyConfig approvalPolicy = policySnapshot(order);
+        syncApprovers(order, requestedApprovers(request.approvers(), request.approverIds()),
+                customer.getId(), order.getCreatedBy(), approvalPolicy);
 
         if (productsExplicitlyRemoved) {
             order.setStatus(OrderStatus.ABANDONED);
@@ -198,6 +207,7 @@ public class OrderService {
                 .findFirst()
                 .orElseThrow(() -> new ForbiddenException("You are not assigned as an approver for this order"));
         assertEligibleApprover(actor.getId(), order.getBusinessCustomerId(), approvalPermission(request.action()));
+        assertApproverCanAct(order, approver);
 
         ApprovalStatus approvalStatus = switch (request.action()) {
             case APPROVE -> ApprovalStatus.APPROVED;
@@ -215,7 +225,7 @@ public class OrderService {
         } else if (request.action() == ApprovalAction.REJECT) {
             order.setStatus(OrderStatus.REJECTED);
             auditAction = AuditActions.ORDER_REJECTED;
-        } else if (allApproversApproved(order)) {
+        } else if (approvalRequirementsSatisfied(order)) {
             order.setStatus(OrderStatus.APPROVED);
             auditAction = AuditActions.ORDER_APPROVED;
         }
@@ -389,40 +399,113 @@ public class OrderService {
         return new ArrayList<>(seen);
     }
 
-    private void syncApprovers(Order order, List<UUID> requestedApproverIds, UUID businessCustomerId) {
-        if (requestedApproverIds == null) {
+    private void syncApprovers(Order order,
+                               List<OrderApproverRequest> requestedApprovers,
+                               UUID businessCustomerId,
+                               UUID creatorId,
+                               OrderApprovalPolicyConfig policy) {
+        if (requestedApprovers == null) {
             return;
         }
-        if (requestedApproverIds.isEmpty()) {
+        if (requestedApprovers.isEmpty()) {
             order.getApprovers().clear();
             return;
         }
 
-        List<UUID> normalizedApproverIds = distinctApproverIds(requestedApproverIds);
-        Set<UUID> eligibleApproverIds = new HashSet<>(eligibleApproverIds(
-                normalizedApproverIds,
-                businessCustomerId,
-                List.of(ORDER_APPROVE)
+        List<UUID> normalizedApproverIds = distinctApproverIds(
+                requestedApprovers.stream().map(OrderApproverRequest::userId).toList());
+        List<UserRepository.ApproverEligibilityView> eligibilityRows = userRepository.findApproverEligibility(
+                normalizedApproverIds, businessCustomerId, UserStatus.ACTIVE, ORDER_APPROVE);
+        Map<UUID, Set<String>> rolesByUser = eligibilityRows.stream().collect(Collectors.groupingBy(
+                UserRepository.ApproverEligibilityView::getUserId,
+                Collectors.mapping(UserRepository.ApproverEligibilityView::getRoleName, Collectors.toSet())
         ));
+        Set<UUID> eligibleApproverIds = rolesByUser.keySet();
         List<UUID> invalidApproverIds = normalizedApproverIds.stream()
                 .filter(approverId -> !eligibleApproverIds.contains(approverId))
                 .toList();
         if (!invalidApproverIds.isEmpty()) {
             throw new ValidationException("Invalid approvers", Map.of("approverIds", invalidApproverIds.toString()));
         }
+        if (!policy.selfApprovalAllowed() && normalizedApproverIds.contains(creatorId)) {
+            throw new BadRequestException("Order creator cannot be assigned as an approver for this customer");
+        }
+        validateApproverLevels(requestedApprovers, policy);
+        validateApproverRoles(requestedApprovers, policy, rolesByUser);
 
         Map<UUID, OrderApprover> existingApprovers = order.getApprovers().stream()
                 .collect(Collectors.toMap(OrderApprover::getUserId, Function.identity()));
         Set<UUID> requestedApproverIdSet = new HashSet<>(normalizedApproverIds);
         order.getApprovers().removeIf(approver -> !requestedApproverIdSet.contains(approver.getUserId()));
 
-        for (UUID approverId : normalizedApproverIds) {
-            if (!existingApprovers.containsKey(approverId)) {
+        for (OrderApproverRequest assignment : requestedApprovers) {
+            UUID approverId = assignment.userId();
+            OrderApprover existing = existingApprovers.get(approverId);
+            if (existing == null) {
                 OrderApprover approver = new OrderApprover();
                 approver.setOrder(order);
                 approver.setUserId(approverId);
+                approver.setApprovalLevel(assignment.approvalLevel());
                 approver.setApprovalStatus(ApprovalStatus.PENDING);
                 order.getApprovers().add(approver);
+            } else if (existing.getApprovalLevel() != assignment.approvalLevel()) {
+                existing.setApprovalLevel(assignment.approvalLevel());
+                existing.setApprovalStatus(ApprovalStatus.PENDING);
+                existing.setRemark(null);
+                existing.setActedAt(null);
+            }
+        }
+    }
+
+    private List<OrderApproverRequest> requestedApprovers(List<OrderApproverRequest> assignments,
+                                                           List<UUID> legacyApproverIds) {
+        if (assignments != null) {
+            return assignments;
+        }
+        if (legacyApproverIds == null) {
+            return null;
+        }
+        return legacyApproverIds.stream().map(id -> new OrderApproverRequest(id, 1)).toList();
+    }
+
+    private void validateApproverLevels(List<OrderApproverRequest> assignments,
+                                        OrderApprovalPolicyConfig policy) {
+        Map<Integer, Long> assignedByLevel = assignments.stream().collect(Collectors.groupingBy(
+                OrderApproverRequest::approvalLevel, Collectors.counting()));
+        Set<Integer> configuredLevels = policy.levels().stream()
+                .map(ApprovalLevelPolicy::levelNumber).collect(Collectors.toSet());
+        List<Integer> invalidLevels = assignedByLevel.keySet().stream()
+                .filter(level -> !configuredLevels.contains(level)).sorted().toList();
+        if (!invalidLevels.isEmpty()) {
+            throw new BadRequestException("Approvers contain unconfigured levels: " + invalidLevels);
+        }
+        for (ApprovalLevelPolicy level : policy.levels()) {
+            long assigned = assignedByLevel.getOrDefault(level.levelNumber(), 0L);
+            if (assigned < level.minimumApprovers()) {
+                throw new BadRequestException("Approval level " + level.levelNumber()
+                        + " requires at least " + level.minimumApprovers() + " approver(s)");
+            }
+        }
+    }
+
+    private void validateApproverRoles(List<OrderApproverRequest> assignments,
+                                       OrderApprovalPolicyConfig policy,
+                                       Map<UUID, Set<String>> rolesByUser) {
+        Map<Integer, ApprovalLevelPolicy> policiesByLevel = policy.levels().stream()
+                .collect(Collectors.toMap(ApprovalLevelPolicy::levelNumber, Function.identity()));
+        for (OrderApproverRequest assignment : assignments) {
+            Set<String> requiredRoles = policiesByLevel.get(assignment.approvalLevel()).eligibleRoles();
+            if (requiredRoles == null || requiredRoles.isEmpty()) {
+                continue;
+            }
+            Set<String> normalizedRequiredRoles = requiredRoles.stream()
+                    .filter(Objects::nonNull)
+                    .map(role -> role.trim().toUpperCase(Locale.ROOT))
+                    .collect(Collectors.toSet());
+            if (rolesByUser.getOrDefault(assignment.userId(), Set.of()).stream()
+                    .noneMatch(normalizedRequiredRoles::contains)) {
+                throw new BadRequestException("Approver " + assignment.userId()
+                        + " is not eligible for approval level " + assignment.approvalLevel());
             }
         }
     }
@@ -483,10 +566,46 @@ public class OrderService {
         }
     }
 
-    private boolean allApproversApproved(Order order) {
-        return !order.getApprovers().isEmpty()
-                && order.getApprovers().stream()
-                .allMatch(approver -> approver.getApprovalStatus() == ApprovalStatus.APPROVED);
+    private void assertApproverCanAct(Order order, OrderApprover approver) {
+        OrderApprovalPolicyConfig policy = policySnapshot(order);
+        if (levelSatisfied(order, approver.getApprovalLevel(), policy)) {
+            throw new BadRequestException("Approval level " + approver.getApprovalLevel() + " is already complete");
+        }
+        if (policy.approvalMode() == ApprovalMode.SEQUENTIAL) {
+            boolean earlierIncomplete = policy.levels().stream()
+                    .filter(level -> level.levelNumber() < approver.getApprovalLevel())
+                    .anyMatch(level -> !levelSatisfied(order, level.levelNumber(), policy));
+            if (earlierIncomplete) {
+                throw new BadRequestException("Earlier approval levels must be completed first");
+            }
+        }
+    }
+
+    private boolean approvalRequirementsSatisfied(Order order) {
+        OrderApprovalPolicyConfig policy = policySnapshot(order);
+        return policy.levels().stream().allMatch(level -> levelSatisfied(order, level.levelNumber(), policy));
+    }
+
+    private boolean levelSatisfied(Order order, int levelNumber, OrderApprovalPolicyConfig policy) {
+        ApprovalLevelPolicy rule = policy.levels().stream()
+                .filter(level -> level.levelNumber() == levelNumber).findFirst()
+                .orElseThrow(() -> new BadRequestException("Approval level is not configured"));
+        List<OrderApprover> assigned = order.getApprovers().stream()
+                .filter(approver -> approver.getApprovalLevel() == levelNumber).toList();
+        if (assigned.size() < rule.minimumApprovers()) {
+            return false;
+        }
+        long approved = assigned.stream()
+                .filter(approver -> approver.getApprovalStatus() == ApprovalStatus.APPROVED).count();
+        return rule.completionRule() == ApprovalCompletionRule.ALL
+                ? approved == assigned.size()
+                : approved >= 1;
+    }
+
+    private OrderApprovalPolicyConfig policySnapshot(Order order) {
+        return order.getApprovalPolicySnapshot() == null
+                ? OrderApprovalPolicyConfig.defaultPolicy()
+                : order.getApprovalPolicySnapshot();
     }
 
     private boolean orderIsComplete(Order order) {
@@ -816,6 +935,7 @@ public class OrderService {
                 .map(approver -> new OrderApproverResponse(
                         approver.getId(),
                         approver.getUserId(),
+                        approver.getApprovalLevel(),
                         approver.getApprovalStatus(),
                         approver.getRemark(),
                         approver.getActedAt()

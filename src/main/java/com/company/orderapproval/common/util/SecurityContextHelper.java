@@ -52,4 +52,8 @@ public final class SecurityContextHelper {
     public static boolean isSuperAdmin() {
         return hasRole("SUPER_ADMIN");
     }
+
+    public static boolean isOrganizationAdmin() {
+        return hasRole("ORGANIZATION_ADMIN");
+    }
 }

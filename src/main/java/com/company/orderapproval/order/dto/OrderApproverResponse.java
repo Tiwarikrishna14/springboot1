@@ -8,6 +8,7 @@ import java.util.UUID;
 public record OrderApproverResponse(
         UUID id,
         UUID userId,
+        int approvalLevel,
         ApprovalStatus approvalStatus,
         String remark,
         Instant actedAt

@@ -16,6 +16,11 @@ import java.util.UUID;
 
 public interface UserRepository extends JpaRepository<User, UUID> {
 
+    interface ApproverEligibilityView {
+        UUID getUserId();
+        String getRoleName();
+    }
+
     Optional<User> findByEmail(String email);
 
     boolean existsByEmail(String email);
@@ -80,6 +85,25 @@ public interface UserRepository extends JpaRepository<User, UUID> {
                                        @Param("businessCustomerId") UUID businessCustomerId,
                                        @Param("activeStatus") UserStatus activeStatus,
                                        @Param("permissionCodes") Collection<String> permissionCodes);
+
+    @Query("""
+            select distinct u.id as userId, upper(r.name) as roleName
+            from User u
+            join UserRole ur on ur.user = u
+            join ur.role r
+            join RolePermission rp on rp.role = r
+            join rp.permission p
+            where u.id in :userIds
+              and u.businessCustomerId = :businessCustomerId
+              and u.status = :activeStatus
+              and r.active = true
+              and p.code = :permissionCode
+            """)
+    List<ApproverEligibilityView> findApproverEligibility(
+            @Param("userIds") Collection<UUID> userIds,
+            @Param("businessCustomerId") UUID businessCustomerId,
+            @Param("activeStatus") UserStatus activeStatus,
+            @Param("permissionCode") String permissionCode);
 
     @Query("""
             select distinct u
